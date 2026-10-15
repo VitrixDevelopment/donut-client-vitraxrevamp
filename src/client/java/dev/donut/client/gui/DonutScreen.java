@@ -276,7 +276,7 @@ public final class DonutScreen extends Screen {
     }
 
     private int cardHeight(int index) {
-        int body = index == 6 ? 147 : index == 5 ? 57 : index == 4 ? 358 : index == 3 ? 112 : index == 2 ? 213 : 282 + colorHeight(index) + filterHeight(index);
+        int body = index == 6 ? 147 : index == 5 ? 57 : index == 4 ? 358 : index == 3 ? 224 : index == 2 ? 213 : 282 + colorHeight(index) + filterHeight(index);
         return CARD_HEADER + (int) Math.round(body * smooth(expansion[index]));
     }
 
@@ -413,6 +413,13 @@ public final class DonutScreen extends Screen {
         text(g, font, ">", rowX + rowW - 15, y + 61, MUTED);
         hit("openAutoBuilder", rowX, y + 53, rowW, 25, () -> toggleEnabled(3));
         text(g, font, "Includes materials, ghost preview and navigation", rowX, y + 89, DIM);
+        var s = config.autoBuilder;
+        section(g, "BUILDING", y + 106);
+        settingToggle(g, "buildUp", "Build access stairs", y + 123, () -> s.buildUp, () -> s.buildUp = !s.buildUp);
+        settingToggle(g, "autoShulker", "Use shulker boxes", y + 146, () -> s.autoShulker, () -> s.autoShulker = !s.autoShulker);
+        settingToggle(g, "autoBuy", "Buy from /ah", y + 169, () -> s.autoBuy, () -> s.autoBuy = !s.autoBuy);
+        slider(g, "maxAhPrice", "Max price per item", y + 195, () -> s.maxAhPrice,
+                value -> s.maxAhPrice = value, 1, 100000, 100, " coins");
     }
     private boolean canUseFreecam() { return minecraft.level != null && minecraft.player != null; }
 

@@ -1,5 +1,6 @@
 package dev.donut.client.autobuild;
 
+import dev.donut.client.config.AutoBuilderSettings;
 import dev.donut.client.freecam.FreecamController;
 import dev.donut.client.mixin.BuilderClientLevelAccessor;
 import dev.donut.client.mixin.BuilderLocalPlayerAccessor;
@@ -19,6 +20,10 @@ public final class AutoBuilderController {
     public enum Status { IDLE, READY, RUNNING, PAUSED, COMPLETED }
     private static final AutoBuilderController INSTANCE = new AutoBuilderController();
     private final BuilderNavigator navigator = new BuilderNavigator();
+    private final Deque<Target> scaffold = new ArrayDeque<>();
+    private final Set<BlockPos> scaffolded = new HashSet<>();
+    private final MaterialSupplier supplier = new MaterialSupplier(new AutoBuilderSettings());
+    private AutoBuilderSettings settings = new AutoBuilderSettings();
     private Schematic schematic;
     private PlacementTransform transform = new PlacementTransform(BlockPos.ZERO, 0, false);
     private boolean previewVisible;
@@ -41,6 +46,7 @@ public final class AutoBuilderController {
     private int tick, scanIndex, cooldown, noProgress, revalidateIndex, finalCheckIndex, originalSlot = -1;
     private boolean scanned;
     private String lastFailure = "";
+    private Target scaffoldGoal;
 
     private record Target(BlockPos pos, BlockState state, int index, boolean support) { }
     private record Prepared(Target target, PlacementPlanner.Plan plan, int readyTick) { }
@@ -56,6 +62,10 @@ public final class AutoBuilderController {
     }
     private AutoBuilderController() { }
     public static AutoBuilderController get() { return INSTANCE; }
+    public void useSettings(AutoBuilderSettings value) {
+        settings = value;
+        supplier.useSettings(value);
+    }
     public Schematic schematic() { return schematic; }
     public PlacementTransform transform() { return transform; }
     public boolean previewVisible() { return previewVisible; }
@@ -101,6 +111,7 @@ public final class AutoBuilderController {
         correct.clear(); failures.clear(); deferred.clear(); scanIndex=0; scanned=false;
         work.clear(); work.addAll(targets); revalidateIndex=0; finalCheckIndex=0;
         session=client.level; tick=0; noProgress=0; lastFailure=""; current=null; pending=null; prepared=null;
+        clearScaffold(); supplier.abort(client);
         originalSlot=client.player.getInventory().getSelectedSlot(); status=Status.RUNNING; previewVisible=true;
         reason="Checking loaded blocks...";
     }
@@ -108,6 +119,7 @@ public final class AutoBuilderController {
     private void pauseWith(String message) {
         if (status != Status.RUNNING && status != Status.PAUSED) { reason=message; return; }
         status=Status.PAUSED; reason=message; prepared=null; navigator.release(); restoreSlot();
+        supplier.abort(Minecraft.getInstance());
     }
     public void resume() {
         if (status != Status.PAUSED) { start(); return; }
@@ -115,6 +127,7 @@ public final class AutoBuilderController {
         if (!canRun(client)) return;
         if (session != client.level) { start(); return; }
         failures.clear(); deferred.clear(); lastFailure=""; noProgress=0; current=null; prepared=null; navigator.reset();
+        clearScaffold(); supplier.abort(client);
         work.clear(); for (Target target:targets) if (!correct.get(target.index)) work.add(target);
         originalSlot=client.player.getInventory().getSelectedSlot(); status=Status.RUNNING; reason="Resuming...";
     }
@@ -129,12 +142,14 @@ public final class AutoBuilderController {
     public void cancel() {
         navigator.reset(); restoreSlot(); current=null; prepared=null; pending=null; session=null;
         failures.clear(); deferred.clear(); cooldown=0;
+        clearScaffold(); supplier.abort(Minecraft.getInstance());
         status=schematic == null ? Status.IDLE : Status.READY; reason="Build cancelled.";
     }
     public void disconnect() {
         if (isRunning() || status==Status.PAUSED) { pauseWith("Disconnected. Rejoin, check the position, then Resume."); }
         navigator.reset(); restoreSlot(); session=null; pending=null; prepared=null; current=null; correct.clear(); scanIndex=0; scanned=false;
         unconfirmed.clear(); predictionLevel=null;
+        clearScaffold(); supplier.abort(Minecraft.getInstance());
         previewVisible=false;
     }
     private void restoreSlot() {
@@ -151,7 +166,14 @@ public final class AutoBuilderController {
         }
         if (client.level == null || client.player == null || client.gameMode == null || client.level != session) { disconnect(); return; }
         if (FreecamController.enabled()) { pauseWith("Freecam is active. Disable it, then Resume."); return; }
-        if (client.screen != null || client.isPaused()) { pauseWith("An open menu paused construction. Close it, then Resume."); return; }
+        if (client.isPaused()) { pauseWith("The game is paused. Unpause, then Resume."); return; }
+        if (client.screen != null && !supplier.handlingMenu(client)) { pauseWith("An open menu paused construction. Close it, then Resume."); return; }
+        if (supplier.active()) {
+            supplier.tick(client,navigator);
+            reason=supplier.status();
+            if (supplier.failure()!=null) { String failure=supplier.failure(); supplier.abort(client); pauseWith(failure); }
+            return;
+        }
         if (!client.player.isAlive() || client.player.isRemoved()) { pauseWith("Player unavailable. Resume after respawning."); return; }
         if (client.player.isPassenger()) { pauseWith("Leave the vehicle, then Resume."); return; }
         if (client.player.isUsingItem()) { pauseWith("Finish using the held item, then Resume."); return; }
@@ -194,7 +216,12 @@ public final class AutoBuilderController {
             return;
         }
         finalCheckIndex=0;
-        if (current == null) current=chooseTarget(client);
+        if (current == null) {
+            // Access blocks being built first, then the target they unlock, then the next schematic block.
+            if (!scaffold.isEmpty()) current=scaffold.peekFirst();
+            else if (scaffoldGoal!=null) { current=scaffoldGoal; scaffoldGoal=null; }
+            else current=chooseTarget(client);
+        }
         if (current == null) {
             pauseWith(lastFailure.isEmpty() ? "No placeable blocks remain. Check unloaded areas, supports and occupied positions." : lastFailure);
             return;
@@ -223,7 +250,14 @@ public final class AutoBuilderController {
         }
         boolean configuring=PlacementPlanner.needsConfiguration(current.state,actual);
         int slot=configuring ? client.player.getInventory().getSelectedSlot() : findSlot(client,requirement.item());
-        if (slot<0) { pauseWith("Missing " + requirement.item().getName().getString() + ". Add materials, then Resume."); return; }
+        if (slot<0) {
+            // A shulker box in the inventory or an auction-house purchase can restock this material.
+            if (supplier.start(client,requirement.item(),requirement.count(),current.pos,indices::containsKey)) {
+                reason="Restocking " + requirement.item().getName().getString() + "...";
+                return;
+            }
+            pauseWith("Missing " + requirement.item().getName().getString() + ". Add materials, then Resume."); return;
+        }
         if (slot>=9) {
             int selected=client.player.getInventory().getSelectedSlot();
             client.gameMode.handleInventoryMouseClick(client.player.inventoryMenu.containerId,slot,selected,ClickType.SWAP,client.player);
@@ -244,8 +278,17 @@ public final class AutoBuilderController {
         if (access!=null) { current=access; return; }
         BuilderNavigator.Result movement=navigator.moveTo(client,current.pos);
         if (movement==BuilderNavigator.Result.ARRIVED) { navigator.rejectCurrent(client); noProgress++; }
-        else if (movement==BuilderNavigator.Result.NO_PATH) { defer("No walking route to " + coordinates(current.pos) + ". Provide a path or stairs, then Resume."); return; }
+        else if (movement==BuilderNavigator.Result.NO_PATH) {
+            // No walking route: build temporary stairs or a bridge from carried support blocks.
+            if (queueScaffold(client,current)) return;
+            defer("No walking route to " + coordinates(current.pos) + ". Provide a path or stairs, then Resume.");
+            return;
+        }
         else if (movement==BuilderNavigator.Result.STUCK) { noProgress+=30; }
+        else if (movement==BuilderNavigator.Result.RECOVERING) {
+            reason="Lag or a position correction. Pausing, then finding a new path...";
+            return;
+        }
         else noProgress++;
         reason="Walking to " + coordinates(current.pos) + " / " + navigator.routeLength() + " steps";
         if (noProgress>300) defer("Cannot reach a valid placement face or orientation at " + coordinates(current.pos) + ". Provide access, then Resume.");
@@ -320,7 +363,13 @@ public final class AutoBuilderController {
         unconfirmed.entrySet().removeIf(entry->entry.getValue()<=sequence);
         if (pending!=null && sequence>=pending.sequence) pending.acknowledged=true;
     }
-    public void positionCorrected() { if (isRunning()) { navigator.replan(); prepared=null; reason="Server corrected the position. Replanning..."; } }
+    public void positionCorrected() {
+        if (isRunning()) {
+            navigator.rubberBanded();
+            prepared=null;
+            reason="Server corrected the position. Pausing, then finding a new path...";
+        }
+    }
     private void finishPending(Minecraft client) {
         Pending action=pending;
         if (!action.acknowledged && action.observed==null) {
@@ -347,16 +396,98 @@ public final class AutoBuilderController {
         }
     }
     private void markCorrect(Target target) {
-        if (target.support) supportBlocks.add(target.pos); else { correct.set(target.index); work.remove(target); }
+        if (target.support) {
+            supportBlocks.add(target.pos);
+            if (!scaffold.isEmpty() && scaffold.peekFirst()==target) scaffold.pollFirst();
+        } else { correct.set(target.index); work.remove(target); }
     }
     private void defer(String message) {
         lastFailure=message;
-        if (current.support) { pauseWith(message); current=null; return; }
+        if (current.support) {
+            if (!scaffold.isEmpty() && scaffold.stream().anyMatch(entry->entry==current)) {
+                // An access block could not be placed: abandon the scaffold and defer its goal instead.
+                Target goal=scaffoldGoal;
+                scaffold.clear(); scaffoldGoal=null; current=null; noProgress=0; navigator.replan();
+                if (goal!=null) { deferred.add(goal.pos); work.remove(goal); }
+                return;
+            }
+            pauseWith(message); current=null; return;
+        }
         deferred.add(current.pos); work.remove(current); current=null; noProgress=0; navigator.reset();
+    }
+    private void clearScaffold() { scaffold.clear(); scaffoldGoal=null; scaffolded.clear(); }
+    /** Plans temporary stairs or a bridge so walking can reach the placement stance for this target. */
+    private boolean queueScaffold(Minecraft client, Target goal) {
+        if (!settings.buildUp || goal.support || scaffolded.contains(goal.pos)) return false;
+        Item material=null;
+        for (Item candidate:List.of(Items.DIRT,Items.COBBLESTONE,Items.STONE,Items.NETHERRACK))
+            if (findSlot(client,candidate)>=0) { material=candidate; break; }
+        if (!(material instanceof BlockItem item)) return false;
+        BuilderPathfinder.Cell stand=chooseStandCell(client,goal);
+        if (stand==null) return false;
+        var solid=new java.util.function.Predicate<BuilderPathfinder.Cell>() {
+            @Override public boolean test(BuilderPathfinder.Cell at) {
+                BlockPos pos=new BlockPos(at.x(),at.y(),at.z());
+                if (!MaterialTracker.isLoaded(client.level,pos)) return false;
+                var state=client.level.getBlockState(pos);
+                return !state.canBeReplaced() && !state.getCollisionShape(client.level,pos).isEmpty();
+            }
+        };
+        var placeable=new java.util.function.Predicate<BuilderPathfinder.Cell>() {
+            @Override public boolean test(BuilderPathfinder.Cell at) {
+                BlockPos pos=new BlockPos(at.x(),at.y(),at.z());
+                if (pos.equals(goal.pos) || indices.containsKey(pos) || !MaterialTracker.isLoaded(client.level,pos)
+                        || !MaterialTracker.isLoaded(client.level,pos.above()) || !client.level.getWorldBorder().isWithinBounds(pos))
+                    return false;
+                return client.level.getBlockState(pos).canBeReplaced()
+                        && client.level.getBlockState(pos.above()).canBeReplaced();
+            }
+        };
+        var standable=new java.util.function.Predicate<BuilderPathfinder.Cell>() {
+            @Override public boolean test(BuilderPathfinder.Cell at) {
+                BlockPos pos=new BlockPos(at.x(),at.y(),at.z());
+                if (!MaterialTracker.isLoaded(client.level,pos) || !MaterialTracker.isLoaded(client.level,pos.above(2))) return false;
+                return client.level.getBlockState(pos.below()).isCollisionShapeFullBlock(client.level,pos.below())
+                        && client.level.getBlockState(pos).canBeReplaced() && client.level.getBlockState(pos.above()).canBeReplaced();
+            }
+        };
+        List<BuilderPathfinder.Cell> blocks=ScaffoldPlanner.plan(
+                new BuilderPathfinder.Cell(client.player.getBlockX(),client.player.getBlockY(),client.player.getBlockZ()),
+                stand,24,standable,placeable,solid);
+        if (blocks.isEmpty()) return false;
+        scaffold.clear();
+        for (BuilderPathfinder.Cell block:blocks)
+            scaffold.addLast(new Target(new BlockPos(block.x(),block.y(),block.z()),item.getBlock().defaultBlockState(),-1,true));
+        scaffoldGoal=goal;
+        scaffolded.add(goal.pos);
+        current=scaffold.peekFirst();
+        reason="Building access to " + coordinates(goal.pos) + "...";
+        return true;
+    }
+    /** Picks a stand cell within reach of the target; temporary blocks will carry the route to it. */
+    private BuilderPathfinder.Cell chooseStandCell(Minecraft client, Target goal) {
+        BuilderPathfinder.Cell best=null;
+        double bestDistance=Double.POSITIVE_INFINITY;
+        for (int dy:new int[]{0,1,-1}) {
+            for (int dx=-2;dx<=2;dx++) for (int dz=-2;dz<=2;dz++) {
+                if (dx==0 && dz==0 && dy==0) continue;
+                var at=new BuilderPathfinder.Cell(goal.pos.getX()+dx,goal.pos.getY()+dy,goal.pos.getZ()+dz);
+                BlockPos pos=new BlockPos(at.x(),at.y(),at.z());
+                if (!MaterialTracker.isLoaded(client.level,pos) || !MaterialTracker.isLoaded(client.level,pos.above())) continue;
+                if (!client.level.getBlockState(pos).canBeReplaced() || !client.level.getBlockState(pos.above()).canBeReplaced()) continue;
+                if (!BuilderNavigator.canPlaceFrom(client,at,goal.pos)) continue;
+                double distance=client.player.position().distanceToSqr(
+                        new net.minecraft.world.phys.Vec3(at.x()+.5,at.y(),at.z()+.5));
+                if (distance<bestDistance) { bestDistance=distance; best=at; }
+            }
+        }
+        return best;
     }
     private void complete() {
         status=Status.COMPLETED; navigator.reset(); restoreSlot(); current=null;
-        reason="Complete: " + correct.cardinality() + " blocks confirmed." + (supportBlocks.isEmpty()?"":" " + supportBlocks.size() + " temporary supports remain.");
+        reason="Complete: " + correct.cardinality() + " blocks confirmed."
+                + (supportBlocks.isEmpty() ? "" : " " + supportBlocks.size() + " temporary supports remain.")
+                + (supplier.placedShulkers() == 0 ? "" : " " + supplier.placedShulkers() + " shulker boxes remain.");
         if (schematic.blocks().stream().anyMatch(block->block.blockEntity()!=null)) reason += " Stored block-entity data needs server support.";
     }
     private static String coordinates(BlockPos pos) { return pos.getX()+", "+pos.getY()+", "+pos.getZ(); }

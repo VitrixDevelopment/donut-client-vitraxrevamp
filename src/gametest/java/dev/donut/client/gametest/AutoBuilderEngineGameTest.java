@@ -241,11 +241,15 @@ public final class AutoBuilderEngineGameTest implements FabricClientGameTest {
                 });
 
                 // Missing items pause in survival; Creative material provisioning cannot grant anything there.
+                // Shulker and auction resupply stay off so the fixture measures the plain shortage pause.
                 server.runCommand("gamemode survival @a"); server.runCommand("clear @a");
                 server.runCommand("tp @a 0.5 65 -8.5 180 10");
                 context.waitTicks(5);
                 var missing=List.of(block(0,0,0,Blocks.QUARTZ_BLOCK.defaultBlockState()));
                 context.runOnClient(client->{
+                    var resupply=new dev.donut.client.config.AutoBuilderSettings();
+                    resupply.autoShulker=false; resupply.autoBuy=false;
+                    builder.useSettings(resupply);
                     builder.setSchematic(schematic("missing fixture",missing));
                     builder.setTransform(new PlacementTransform(new BlockPos(0,65,-11),0,false));
                     builder.getMaterials(client);
@@ -278,7 +282,11 @@ public final class AutoBuilderEngineGameTest implements FabricClientGameTest {
             }
             context.runOnClient(client->require(!builder.isRunning() && !builder.previewVisible(),"Disconnect did not stop AutoBuilder"));
         } finally {
-            context.runOnClient(client->{ AutoBuilderPacketTrace.stop(); builder.cancel(); builder.setSchematic(null); FreecamController.getInstance().setEnabled(false); });
+            context.runOnClient(client->{
+                AutoBuilderPacketTrace.stop(); builder.cancel(); builder.setSchematic(null);
+                builder.useSettings(new dev.donut.client.config.AutoBuilderSettings());
+                FreecamController.getInstance().setEnabled(false);
+            });
         }
     }
     private static void awaitFinished(ClientGameTestContext context,AutoBuilderController builder,int maximumTicks) {
