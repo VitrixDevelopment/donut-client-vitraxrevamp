@@ -58,6 +58,7 @@ public final class DonutClient implements ClientModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(fly::serverStopping);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> fly.serverDisconnected(server, handler.player));
         AutoBuilderController autoBuilder = AutoBuilderController.get();
+        autoBuilder.useSettings(config.autoBuilder);
         ClientTickEvents.START_CLIENT_TICK.register(autoBuilder::tick);
         HighlightRenderer renderer = new HighlightRenderer(config, scanner, chunkScanner);
         renderer.register();

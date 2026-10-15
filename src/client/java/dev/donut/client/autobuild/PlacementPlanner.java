@@ -62,6 +62,14 @@ public final class PlacementPlanner {
     }
 
     public static Plan plan(Minecraft client, BlockPos target, BlockState desired, ItemStack stack) {
+        return plan(client, target, desired, stack, false);
+    }
+
+    /**
+     * When {@code anyState} is set the prediction only has to be the same block, which suits
+     * blocks whose facing follows the clicked face, such as shulker boxes.
+     */
+    public static Plan plan(Minecraft client, BlockPos target, BlockState desired, ItemStack stack, boolean anyState) {
         if (client.level == null || client.player == null) return null;
         BlockState actual = client.level.getBlockState(target);
         boolean configure = needsConfiguration(desired, actual);
@@ -104,7 +112,8 @@ public final class PlacementPlanner {
                 BlockPlaceContext context = item.updatePlacementContext(new BlockPlaceContext(client.player,InteractionHand.MAIN_HAND,stack,hit));
                 if (context == null || !context.getClickedPos().equals(target) || !context.canPlace()) continue;
                 BlockState predicted = ((BlockItemAccessor)item).donut$getPlacementState(context);
-                if (compatible(desired,predicted)) return new Plan(hit,predicted,yaw,pitch,false);
+                if (anyState ? predicted != null && predicted.getBlock() == desired.getBlock() : compatible(desired,predicted))
+                    return new Plan(hit,predicted,yaw,pitch,false);
             }
         } finally { client.player.setYRot(oldYaw); client.player.setXRot(oldPitch); }
         return null;
