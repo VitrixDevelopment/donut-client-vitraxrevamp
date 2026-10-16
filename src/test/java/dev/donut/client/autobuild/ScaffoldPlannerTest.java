@@ -75,7 +75,9 @@ class ScaffoldPlannerTest {
     private static void assertChain(List<Cell> blocks, Set<Cell> foundation) {
         for (int i = 0; i < blocks.size(); i++) {
             Cell block = blocks.get(i);
-            boolean attached = foundation.contains(block);
+            boolean attached = foundation.stream().anyMatch(base ->
+                    Math.abs(block.x() - base.x()) + Math.abs(block.y() - base.y())
+                            + Math.abs(block.z() - base.z()) == 1);
             for (int j = 0; j < i && !attached; j++) {
                 Cell earlier = blocks.get(j);
                 attached = Math.abs(block.x() - earlier.x()) + Math.abs(block.y() - earlier.y())
