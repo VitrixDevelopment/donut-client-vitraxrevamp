@@ -175,7 +175,8 @@ public final class BuilderNavigator {
 
     /** True when standing at {@code at} lets the player place a block into {@code destination} within reach. */
     public static boolean canPlaceFrom(Minecraft client, BuilderPathfinder.Cell at, BlockPos destination) {
-        return client.level != null && client.player != null && goal(client, at, destination);
+        return client.level != null && client.player != null
+                && goal(client, at, destination, null);
     }
 
     private boolean goal(Minecraft client, BuilderPathfinder.Cell at, BlockPos destination) {
