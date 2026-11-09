@@ -91,6 +91,23 @@ public final class BlockEspGameTest implements FabricClientGameTest {
             context.runOnClient(mc -> config.blockEsp.coal = true);
             context.waitTicks(2);
             require(!expected.isEmpty(), "Fresh comparison must include actual generated target ores");
+
+            // A server-side feature-seed/seed change makes simulation unable to predict any ore.
+            // Three-plus received ores with zero prediction matches must refute the seed, suppress
+            // its random positions, and still surface every ore the server actually sent.
+            context.runOnClient(mc -> config.blockEsp.seed = "-1");
+            context.waitFor(mc -> {
+                require(!scanner.status().startsWith("Prediction failed"), scanner.status());
+                return scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.REFUTED
+                        && new HashSet<>(scanner.snapshot()).equals(expected);
+            }, 2400);
+            require(context.computeOnClient(mc -> scanner.matchedOres() == 0 && scanner.observedOres() >= 3),
+                    "Refutation must rest on at least three unpredicted received ores");
+            // Restoring the true seed re-verifies simulation against the same received ores.
+            context.runOnClient(mc -> config.blockEsp.seed = BlockEspSettings.DEFAULT_SEED);
+            context.waitFor(mc -> scanner.completedChunks() == 9
+                    && scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.VERIFIED
+                    && new HashSet<>(scanner.snapshot()).equals(expected), 2400);
             var target = expected.iterator().next().pos();
             int cameraX = target.getX() + 8, cameraY = target.getY() + 8, cameraZ = target.getZ() + 8;
             server.runCommand("fill " + (cameraX - 1) + " " + (cameraY - 1) + " " + (cameraZ - 1) + " "

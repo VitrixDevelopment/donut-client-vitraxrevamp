@@ -15,7 +15,12 @@ public final class BlockEspHud {
         if (!settings.enabled || !settings.showHud || !config.showHud || client.options.hideGui || client.player == null || client.screen != null) return;
         var text = new ArrayList<String>();
         var colors = new ArrayList<Integer>();
-        text.add("BlockESP | Predicted"); colors.add(0xFFE5EFF9);
+        text.add(switch (controller.seedTrust()) {
+            case VERIFIED -> "BlockESP | Seed verified";
+            case MIXED -> "BlockESP | Predicted + received";
+            case REFUTED -> "BlockESP | Received chunks";
+            case UNKNOWN, SUSPECT -> "BlockESP | Predicted";
+        }); colors.add(0xFFE5EFF9);
         text.add(controller.status()); colors.add(0xFFB3C3D3);
         for (var kind : OreMarker.Kind.values()) {
             if (kind == OreMarker.Kind.EMERALD ? !settings.emerald : !settings.coal) continue;
