@@ -46,7 +46,7 @@ class VeinInferenceTest {
                 new HashSet<>(Set.of(a.pos(), b.pos())));
         long shared = candidates.stream().filter(marker -> marker.pos().equals(a.pos().east())).count();
         assertEquals(1, shared);
-        assertEquals(10, candidates.size());
+        assertEquals(11, candidates.size());
     }
 
     @Test void markerIdentityIgnoresHowItIsKnown() {

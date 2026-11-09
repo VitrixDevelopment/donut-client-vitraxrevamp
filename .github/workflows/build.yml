@@ -26,6 +26,18 @@ jobs:
       - name: Surface build errors as annotations
         if: failure()
         run: |
+          for f in build/test-results/test/*.xml; do
+            [ -f "$f" ] || continue
+            grep -o 'testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "$f" | while IFS= read -r line; do echo "::error::TEST $line"; done
+            grep -o '<testcase name="[^"]*"[^>]*>' "$f" | head -5 >/dev/null
+            python3 - "$f" <<'PYEOF' | while IFS= read -r line; do echo "::error::FAILED $line"; done
+          import sys, xml.etree.ElementTree as ET
+          for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
+              for bad in list(case):
+                  if bad.tag in ("failure", "error"):
+                      print(case.get("classname") + "." + case.get("name") + " :: " + (bad.get("message") or "")[:200])
+          PYEOF
+          done
           grep -E "error:|FAILURE:|What went wrong|Could not|Execution failed" -A 4 gradle.log | head -60 | while IFS= read -r line; do
             clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
             [ -n "$clean" ] && echo "::error::$clean"
