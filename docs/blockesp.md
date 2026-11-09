@@ -6,7 +6,20 @@ BlockESP highlights **deepslate emerald ore** and **deepslate coal ore**. It com
    has already sent are highlighted. No seed, simulation, or server cooperation is involved, so this
    works on any server — including servers where seed prediction has been patched. It can only show
    what the server sends: anti-xray may disguise unexposed ores as stone/deepslate, so hidden ores
-   may be absent until they are exposed, while exposed ores are shown truthfully.
+   may be absent until they are exposed, while exposed ores are shown truthfully. Received ores are
+   remembered per chunk (up to 512 chunks), so an ore the server revealed while you were mining
+   stays marked after its chunk unloads; a loaded chunk is authoritative and forgets ores that have
+   since been mined.
+2. **Vein inference (probable, dimmer).** Deepslate coal generates in connected blobs of 20–30
+   blocks, so when part of a vein is received, its face-neighbours that still read as deepslate —
+   exactly what obfuscation disguises hidden coal as — are probably the same vein. Those positions
+   are shown at one-third opacity as hypotheses. Deepslate emerald generates as single scattered
+   blocks and never gets inferred markers. Inferred markers never count as seed-trust evidence.
+
+There is no third source, and there cannot be one: a fully hidden ore on a server that both
+obfuscates chunk data and scrambles feature seeds is, information-theoretically, not present in
+anything the client receives and not derivable from any seed the client can know. BlockESP extracts
+everything the client legitimately receives (including vein shape), and nothing it does not.
 2. **Seed prediction (when it still applies).** For vanilla 1.21.11 Overworld terrain generated
    from the configured world seed, a local vanilla generation world reconstructs the original ore
    positions, including ores anti-xray hides.

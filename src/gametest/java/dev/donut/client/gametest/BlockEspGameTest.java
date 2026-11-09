@@ -68,7 +68,7 @@ public final class BlockEspGameTest implements FabricClientGameTest {
                 require(!scanner.status().startsWith("Prediction failed"), scanner.status());
                 return scanner.completedChunks() == 9;
             }, 2400);
-            context.runOnClient(mc -> require(new HashSet<>(scanner.snapshot()).equals(expected),
+            context.runOnClient(mc -> require(knownMarkers(scanner).equals(expected),
                     "Seed prediction disagrees with fresh vanilla chunks: expected " + expected + ", actual " + scanner.snapshot()));
 
             // Both exact variants must survive scanning above and below Y=0, at negative world coordinates.
@@ -99,7 +99,7 @@ public final class BlockEspGameTest implements FabricClientGameTest {
             context.waitFor(mc -> {
                 require(!scanner.status().startsWith("Prediction failed"), scanner.status());
                 return scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.REFUTED
-                        && new HashSet<>(scanner.snapshot()).equals(expected);
+                        && knownMarkers(scanner).equals(expected);
             }, 2400);
             require(context.computeOnClient(mc -> scanner.matchedOres() == 0 && scanner.observedOres() >= 3),
                     "Refutation must rest on at least three unpredicted received ores");
@@ -107,7 +107,11 @@ public final class BlockEspGameTest implements FabricClientGameTest {
             context.runOnClient(mc -> config.blockEsp.seed = BlockEspSettings.DEFAULT_SEED);
             context.waitFor(mc -> scanner.completedChunks() == 9
                     && scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.VERIFIED
-                    && new HashSet<>(scanner.snapshot()).equals(expected), 2400);
+                    && knownMarkers(scanner).equals(expected), 2400);
+            require(context.computeOnClient(mc -> scanner.snapshot().stream().filter(OreMarker::inferred)
+                    .allMatch(marker -> marker.kind() == OreMarker.Kind.COAL && expected.stream()
+                            .anyMatch(ore -> ore.kind() == OreMarker.Kind.COAL && ore.pos().distManhattan(marker.pos()) == 1))),
+                    "Inferred marker is not a face-neighbour of a received coal block");
             var target = expected.iterator().next().pos();
             int cameraX = target.getX() + 8, cameraY = target.getY() + 8, cameraZ = target.getZ() + 8;
             server.runCommand("fill " + (cameraX - 1) + " " + (cameraY - 1) + " " + (cameraZ - 1) + " "
@@ -132,6 +136,12 @@ public final class BlockEspGameTest implements FabricClientGameTest {
             context.runOnClient(mc -> { scanner.close(); renderer.close(); mc.options.guiScale().set(originalScale); mc.resizeDisplay(); });
         }
         require(scanner.snapshot().isEmpty(), "Disconnect retained prediction markers");
+    }
+    /** Snapshot without probable vein continuations, which are hypotheses rather than observations. */
+    private static java.util.Set<OreMarker> knownMarkers(BlockEspController scanner) {
+        var result = new HashSet<OreMarker>();
+        for (var marker : scanner.snapshot()) if (!marker.inferred()) result.add(marker);
+        return result;
     }
     private static void require(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

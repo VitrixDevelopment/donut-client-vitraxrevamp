@@ -55,6 +55,8 @@ public final class BlockEspController implements AutoCloseable {
     private List<OreMarker> markers = List.of();
     /** Exact target ores present in chunks the server has sent, refreshed every tick. */
     private List<OreMarker> liveMarkers = List.of();
+    /** Received ores remembered per chunk, so anti-xray reveals survive chunk unloads. */
+    private final LinkedHashMap<Long, List<OreMarker>> liveCache = new LinkedHashMap<>();
     private SeedTrust.State trust = SeedTrust.State.UNKNOWN;
     private int matchedOres, observedOres;
     private String status = "Disabled";
@@ -199,6 +201,15 @@ public final class BlockEspController implements AutoCloseable {
         for (var marker : liveMarkers) {
             if (marker.kind() == OreMarker.Kind.EMERALD ? settings.emerald : settings.coal) found.add(marker);
         }
+        // Probable continuation of revealed coal veins: still-disguised deepslate neighbours.
+        if (settings.coal) {
+            var knownPositions = new HashSet<net.minecraft.core.BlockPos>();
+            for (var marker : found) knownPositions.add(marker.pos());
+            found.addAll(VeinInference.candidates(liveMarkers,
+                    pos -> client.level.getChunkSource().getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.FULL, false) != null
+                            && client.level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.DEEPSLATE),
+                    knownPositions));
+        }
         var sorted = new ArrayList<>(found);
         sorted.sort(Comparator.comparingDouble(marker -> marker.pos().distToCenterSqr(client.player.position())));
         markers = List.copyOf(sorted);
@@ -210,10 +221,23 @@ public final class BlockEspController implements AutoCloseable {
      * "miss" would merely mean the simulation has not reached that chunk yet.
      */
     private void scanReceivedChunks(ClientLevel level, int radius) {
-        var live = new ArrayList<OreMarker>();
+        // Refresh remembered ores for every received chunk in range. A chunk that is currently
+        // loaded is authoritative (an empty scan forgets ores mined since it was last seen);
+        // an unloaded chunk keeps its last received contents, which is exactly how a block that
+        // anti-xray revealed while mining stays marked after the player walks away.
         for (int dz = -radius; dz <= radius; dz++) for (int dx = -radius; dx <= radius; dx++) {
-            var chunk = level.getChunkSource().getChunk(centerX + dx, centerZ + dz, ChunkStatus.FULL, false);
-            if (chunk != null) live.addAll(VanillaOreGenerator.findOres(chunk));
+            int cx = centerX + dx, cz = centerZ + dz;
+            var chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+            if (chunk == null) continue;
+            liveCache.put(ChunkPos.asLong(cx, cz), VanillaOreGenerator.findOres(chunk).stream()
+                    .map(marker -> marker.withSource(OreMarker.Source.RECEIVED)).toList());
+            while (liveCache.size() > MAX_CACHED_CHUNKS) liveCache.remove(liveCache.keySet().iterator().next());
+        }
+        var live = new ArrayList<OreMarker>();
+        for (var entry : liveCache.entrySet()) {
+            ChunkPos chunk = new ChunkPos(entry.getKey());
+            if (Math.abs(chunk.x - centerX) <= radius && Math.abs(chunk.z - centerZ) <= radius)
+                live.addAll(entry.getValue());
         }
         liveMarkers = List.copyOf(live);
         var predicted = new HashSet<OreMarker>();
@@ -258,6 +282,7 @@ public final class BlockEspController implements AutoCloseable {
         active = false;
         lastLevel = null;
         liveMarkers = List.of();
+        liveCache.clear();
         trust = SeedTrust.State.UNKNOWN;
         matchedOres = observedOres = 0;
         status = message;
@@ -268,6 +293,7 @@ public final class BlockEspController implements AutoCloseable {
         cache.clear();
         markers = List.of();
         liveMarkers = List.of();
+        liveCache.clear();
         trust = SeedTrust.State.UNKNOWN;
         matchedOres = observedOres = 0;
         completed = total = 0;

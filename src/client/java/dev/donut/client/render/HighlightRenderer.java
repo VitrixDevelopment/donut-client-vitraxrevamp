@@ -179,10 +179,12 @@ public final class HighlightRenderer implements AutoCloseable {
             var settings = config.blockEsp;
             for (var marker : blockEsp.snapshot()) {
                 int rgb = marker.kind() == OreMarker.Kind.EMERALD ? settings.emeraldColor : settings.coalColor;
-                int outline = settings.opacity << 24 | rgb;
+                // Inferred vein continuations are hypotheses: same hue, visibly fainter.
+                int outlineAlpha = marker.inferred() ? Math.max(1, settings.opacity / 3) : settings.opacity;
+                int outline = outlineAlpha << 24 | rgb;
                 AABB bounds = new AABB(marker.pos()).inflate(.003);
                 if (context.frustum().isVisible(bounds)) boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z),
-                        argb(rgb, settings.opacity / 255.0 * .12), outline, 1.8f, true));
+                        argb(rgb, settings.opacity / 255.0 * (marker.inferred() ? .04 : .12)), outline, 1.8f, true));
                 if (settings.tracers) lines.add(new DrawLine(Vec3.ZERO, Vec3.atCenterOf(marker.pos()).subtract(camera), outline, true));
             }
         }

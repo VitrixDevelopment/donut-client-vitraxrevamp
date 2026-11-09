@@ -40,7 +40,7 @@ public final class SeedTrust {
         SUSPECT,
         /** Some ores match and some do not: old (seed-generated) and new (re-seeded) chunks coexist. */
         MIXED,
-        /** {@value #REFUTATION_SAMPLE}+ ores observed, none predicted: predictions are random noise. */
+        /** {@value SeedTrust#REFUTATION_SAMPLE}+ ores observed, none predicted: predictions are random noise. */
         REFUTED
     }
 
