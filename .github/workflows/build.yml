@@ -20,7 +20,27 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
       - name: Build and run unit tests
-        run: bash gradlew build --no-daemon
+        run: |
+          set -o pipefail
+          bash gradlew build --no-daemon --stacktrace 2>&1 | tee gradle.log
+      - name: Surface build errors as annotations
+        if: failure()
+        run: |
+          grep -E "error:|FAILURE:|What went wrong|Could not|Execution failed" -A 4 gradle.log | head -60 | while IFS= read -r line; do
+            clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
+            [ -n "$clean" ] && echo "::error::$clean"
+          done
+          tail -40 gradle.log | while IFS= read -r line; do
+            clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
+            [ -n "$clean" ] && echo "::warning::LOG $clean"
+          done
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: gradle.log
+          if-no-files-found: ignore
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:
