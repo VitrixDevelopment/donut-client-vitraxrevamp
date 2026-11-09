@@ -33,6 +33,7 @@ import org.lwjgl.glfw.GLFW;
 public final class AutoBuilderGuiGameTest implements FabricClientGameTest {
     @Override public void runTest(ClientGameTestContext context) {
         ClientConfig config = new ClientConfig();
+        config.autoBuilder.spectreCreative = false; // Existing Survival/multiplayer UI regression.
         AtomicInteger saves = new AtomicInteger();
         AutoBuilderController builder = AutoBuilderController.get();
         String originalBinding = context.computeOnClient(client -> ModuleKeybinds.mapping(3).saveString());
@@ -63,11 +64,13 @@ public final class AutoBuilderGuiGameTest implements FabricClientGameTest {
             world.getClientWorld().waitForChunksRender();
 
             GuiTestInput.openAnimated(context, () -> new DonutScreen(config, saves::incrementAndGet));
-            require(GuiTestInput.visible(context, "module0") && GuiTestInput.visible(context, "module1")
+
+            GuiTestInput.click(context, "tab0");
+            require(GuiTestInput.visible(context, "module4") && GuiTestInput.visible(context, "module5")
                     && GuiTestInput.visible(context, "module2") && !GuiTestInput.visible(context, "module3"),
-                    "Visual must contain only its three visual modules");
+                    "Visual modules must remain available");
             GuiTestInput.clickWithFade(context, "tab3", "contentProgress");
-            require(GuiTestInput.visible(context, "module3") && GuiTestInput.visible(context, "keybind3"),
+            require(GuiTestInput.visible(context, "module3") && GuiTestInput.visible(context, "enable3"),
                     "AutoBuilder and its key box are missing from Blatant");
             require(!GuiTestInput.visible(context, "module0") && !GuiTestInput.visible(context, "module1")
                     && !GuiTestInput.visible(context, "module2"), "Visual modules leaked into Blatant");
@@ -90,7 +93,7 @@ public final class AutoBuilderGuiGameTest implements FabricClientGameTest {
             require(!GuiTestInput.visible(context, "module3"), "Favoriting AutoBuilder moved it back into Visual");
             GuiTestInput.click(context, "tab3");
             screenshot(context, "autobuilder-01-blatant-category");
-            click(context, "module3");
+            GuiTestInput.clickOpeningScreen(context, "enable3");
             context.waitForScreen(AutoBuilderScreen.class);
             settle(context);
             require(visible(context, "folder") && visible(context, "refresh"), "Library folder controls are missing");

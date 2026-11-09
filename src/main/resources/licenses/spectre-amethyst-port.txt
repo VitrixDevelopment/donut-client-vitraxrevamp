@@ -1,0 +1,10 @@
+Spectre 26.2 Amethyst Bypass port
+
+AmethystScanner adapts Spectre Client 26.2 AmethystBypassModule by 4ldenz,
+licensed GPL-3.0-only. Bypass, Light and ANBS+ Scan methods and the optional
+tracer are retained. The shared GeodeGlowScan also derives from Spectre.
+The corresponding license is spectre-GPL-3.0.txt.
+
+Donut Client supplies native rendering, settings, input and HUD integration.
+Original Donut authorship and MIT notices are retained. The distribution
+includes GPL components and is accompanied by its matching source artifact.

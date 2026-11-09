@@ -1,356 +1,555 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapted from Spectre 26.2 by 4ldenz. See docs/spectre-base-finder-port.md.
 package dev.donut.client.chunkfinder;
 
-import dev.donut.client.config.ChunkFinderSettings;
 import dev.donut.client.config.ClientConfig;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.Comparator;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import dev.donut.client.chunkfinder.SuspectObjects.Category;
+import java.lang.ref.WeakReference;
+import java.util.concurrent.CopyOnWriteArrayList;
+import net.minecraft.network.protocol.Packet;
+
+import it.unimi.dsi.fastutil.longs.Long2BooleanOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.Long2IntMap.Entry;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
+import java.util.function.LongConsumer;
+import java.util.*;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.tags.BlockTags;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.core.Direction;
+import net.minecraft.core.BlockPos.MutableBlockPos;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
+import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
+import net.minecraft.util.ARGB;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.BambooStalkBlock;
-import net.minecraft.world.level.block.BeehiveBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.CocoaBlock;
-import net.minecraft.world.level.block.GrowingPlantHeadBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 
-/** Incrementally reads loaded chunk palettes and blocks without requesting chunks or packets. */
 public final class ChunkFinderScanner {
-    public static final int MAX_TARGETS = 256;
-    public static final int MAX_BLOCKS_PER_TICK = 4096;
-    private static final int MAX_SECTIONS_PER_TICK = 64;
-    private static final int MAX_CHUNKS_PER_TICK = 32;
-    private static final int MAX_SCORE_PER_KIND = 24;
-    private static final long WORK_NANOS_PER_TICK = 3_000_000L;
+   private static final long SCAN_BUDGET_NANOS = 3000000L;
+   private static final int MIN_SCANNED_NEIGHBOURS = 3;
+   private static final int NO_PACKET_SENSITIVITY = 1;
+   private static final int VISIBLE_REFRESH_TICKS = 20;
+   private static final int PACKET_MIN_Y = -16;
+   private static final int PACKET_MAX_Y = 30;
+   private static final String METHOD_CLASSIC = "Classic";
+   private static final String METHOD_ANBS = "ANBS+ Scan";
+   private static final int GLOW_CELLS_PER_POINT = 12;
+   private final java.util.Map<Long,ActivityClues.Summary> activityReports=new java.util.HashMap<>();
+   private final Map<Long,List<SuspectObjects.Found>> objectReports = new HashMap<>();
+   private final Map<Long,List<BlockPos>> lightReports = new HashMap<>();
+   private List<SuspectObjects.Marker> markers = List.of();
+   private int objectAge;
+   private boolean detailLimited;
+   private final GeodeGlowScan glow = new GeodeGlowScan();
+   private final Long2IntOpenHashMap heat = new Long2IntOpenHashMap();
+   private final Long2IntOpenHashMap vetoes = new Long2IntOpenHashMap();
+   private final Long2IntOpenHashMap chunkScore = new Long2IntOpenHashMap();
+   private final Long2BooleanOpenHashMap chunkUngrown = new Long2BooleanOpenHashMap();
+   private final Long2BooleanOpenHashMap chunkHasPacket = new Long2BooleanOpenHashMap();
+   private final LongOpenHashSet scannedChunks = new LongOpenHashSet();
+   private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
+   private final LongOpenHashSet queued = new LongOpenHashSet();
+   private final LongOpenHashSet pendingLight = new LongOpenHashSet();
+   private Long2IntOpenHashMap visible = new Long2IntOpenHashMap();
+   private boolean visibleDirty = true;
+   private int visibleAge;
+   private ClientLevel lastLevel;
+   private int appliedRadius;
 
-    private final ClientConfig config;
-    private final Map<Long, Detection> detections = new HashMap<>();
-    private final Set<Long> visitedThisPass = new HashSet<>();
-    private List<FoundChunk> targets = List.of();
-    private List<ChunkPos> scanOrder = List.of();
-    private ClientLevel lastLevel;
-    private ScanSettings lastSettings;
-    private ScanWork active;
-    private int centerX;
-    private int centerZ;
-    private int cursor;
-    private long completedPasses;
-    private long scannedChunks;
+   private final ClientConfig config;
+   private static final List<WeakReference<ChunkFinderScanner>> INSTANCES = new CopyOnWriteArrayList<>();
+   private ScanKey appliedSettings;
+   private long scans;
 
-    public ChunkFinderScanner(ClientConfig config) { this.config = config; }
-    public List<FoundChunk> snapshot() { return targets; }
-    /** Complete coverage passes through the current scan area, including unloaded coordinates. */
-    public long completedPasses() { return completedPasses; }
-    public long scannedChunkCount() { return scannedChunks; }
+   public ChunkFinderScanner(ClientConfig config) {
+      this.config = config;
+      INSTANCES.add(new WeakReference<>(this));
+   }
 
-    public static int thresholdForSensitivity(int sensitivity) {
-        return 14 - 2 * Math.clamp(sensitivity, 1, 5);
-    }
+   /** Applied packets are observed only; no requests or fabricated world data are sent. */
+   public static void packetApplied(Packet<?> packet) {
+      for (var reference : INSTANCES) {
+         var scanner = reference.get();
+         if (scanner == null) INSTANCES.remove(reference);
+         else if (scanner.config.chunkFinder.enabled && scanner.lastLevel != null) scanner.onPacketApplied(packet);
+      }
+   }
 
-    public void clear() {
-        detections.clear();
-        visitedThisPass.clear();
-        targets = List.of();
-        scanOrder = List.of();
-        lastLevel = null;
-        lastSettings = null;
-        active = null;
-        cursor = 0;
-        completedPasses = 0;
-        scannedChunks = 0;
-    }
+   /** 1.21.11 defers packet light application; observe it after vanilla's queued task. */
+   public static void lightQueued(ClientLevel level, int x, int z) {
+      if (level == null || INSTANCES.stream().noneMatch(reference -> {
+         var scanner = reference.get();
+         return scanner != null && scanner.config.chunkFinder.enabled && scanner.config.chunkFinder.method.equals("ANBS+ Scan");
+      })) return;
+      level.queueLightUpdate(() -> {
+         for (var reference : INSTANCES) {
+            var scanner = reference.get();
+            if (scanner != null && scanner.lastLevel == level && scanner.config.chunkFinder.enabled
+                    && scanner.config.chunkFinder.method.equals("ANBS+ Scan")) scanner.pendingLight.add(ChunkPos.asLong(x, z));
+         }
+      });
+   }
 
-    public void tick(Minecraft client) {
-        if (client.level == null || client.player == null || !config.chunkFinder.enabled) {
-            clear();
-            return;
-        }
-        ScanSettings settings = ScanSettings.of(config.chunkFinder);
-        if (!settings.hasFilters()) { clear(); return; }
-        int playerX = client.player.chunkPosition().x;
-        int playerZ = client.player.chunkPosition().z;
-        if (client.level != lastLevel || !settings.equals(lastSettings)) {
-            clear();
-            lastLevel = client.level;
-            lastSettings = settings;
-            rebuildOrder(playerX, playerZ, settings.radius());
-        } else if (playerX != centerX || playerZ != centerZ) {
-            rebuildOrder(playerX, playerZ, settings.radius());
-        }
+   public List<SuspectObjects.Marker> snapshot() { return markers; }
+   public Map<Long, Integer> visibleChunks() { return Map.copyOf(visible); }
+   public ActivityClues.Summary activityReport(long chunk) { return activityReports.get(chunk); }
+   public boolean detailLimited() { return detailLimited; }
+   public long scannedChunkCount() { return scans; }
+   public int pendingChunks() { return queue.size(); }
+   public void clear() { clearAll(); lastLevel = null; appliedSettings = null; scans = 0; }
 
-        boolean dirty = detections.entrySet().removeIf(entry -> {
-            Detection detection = entry.getValue();
-            FoundChunk result = detection.result();
-            return !inRange(result.chunkX(), result.chunkZ(), settings.radius())
-                    || loadedChunk(client.level, result.chunkX(), result.chunkZ()) != detection.chunk();
-        });
-        if (active != null && loadedChunk(client.level, active.pos.x, active.pos.z) != active.chunk) {
-            active = null;
-        }
+   private void clearAll() {
+      glow.clear();
+      this.activityReports.clear();
+      this.objectReports.clear();this.lightReports.clear();this.markers=List.of();this.objectAge=0;this.detailLimited=false;
+      this.heat.clear();
+      this.vetoes.clear();
+      this.chunkScore.clear();
+      this.chunkUngrown.clear();
+      this.chunkHasPacket.clear();
+      this.scannedChunks.clear();
+      this.queue.clear();
+      this.queued.clear();
+      this.pendingLight.clear();
+      this.visible = new Long2IntOpenHashMap();
+      this.visibleDirty = true;
+      this.appliedRadius = config.chunkFinder.simulationDistance;
+   }
 
-        int blocksLeft = MAX_BLOCKS_PER_TICK;
-        int sectionsLeft = MAX_SECTIONS_PER_TICK;
-        int chunksLeft = MAX_CHUNKS_PER_TICK;
-        long deadline = System.nanoTime() + WORK_NANOS_PER_TICK;
-        while (blocksLeft > 0 && sectionsLeft > 0 && chunksLeft > 0) {
-            if (active == null) {
-                if (cursor >= scanOrder.size()) {
-                    completedPasses++;
-                    visitedThisPass.clear();
-                    rebuildOrder(centerX, centerZ, settings.radius());
-                    break;
-                }
-                ChunkPos next = scanOrder.get(cursor++);
-                visitedThisPass.add(next.toLong());
-                chunksLeft--;
-                LevelChunk chunk = loadedChunk(client.level, next.x, next.z);
-                if (chunk == null) continue;
-                active = new ScanWork(chunk, next);
+   private static boolean isLoaded(ClientLevel level, int x, int z) {
+      return level.getChunkSource().getChunk(x, z, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false) != null;
+   }
+
+   private void queueLoadedChunks() {
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.level != null && mc.player != null) {
+         int radius = mc.options.renderDistance().get() + 1;
+         ChunkPos center = mc.player.chunkPosition();
+
+         for (int x = center.x - radius; x <= center.x + radius; x++) {
+            for (int z = center.z - radius; z <= center.z + radius; z++) {
+               if (isLoaded(mc.level, x, z)) {
+                  this.enqueue(ChunkPos.asLong(x, z));
+               }
             }
-            var sections = active.chunk.getSections();
-            if (active.sectionIndex >= sections.length) {
-                dirty |= finishScan(settings);
-                scannedChunks++;
-                active = null;
-                continue;
+         }
+      }
+   }
+
+   private void enqueue(long key) {
+      if (this.queued.add(key)) {
+         this.queue.enqueue(key);
+      }
+   }
+
+   private void onPacketApplied(Packet<?> packet) {
+      if (packet instanceof ClientboundLevelChunkWithLightPacket chunk) {
+         this.enqueue(ChunkPos.asLong(chunk.getX(), chunk.getZ()));
+      } else if (packet instanceof ClientboundLightUpdatePacket light && config.chunkFinder.method.equals("ANBS+ Scan")) {
+         this.pendingLight.add(ChunkPos.asLong(light.getX(), light.getZ()));
+      } else if(packet instanceof net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket forget){
+         this.forgetChunk(ChunkPos.asLong(forget.pos().x,forget.pos().z));
+      } else {
+         if(packet instanceof net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket block)blockChanged(block.getPos(),block.getBlockState());
+         else if(packet instanceof net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket section)section.runUpdates(this::blockChanged);
+      }
+   }
+
+   private void forgetChunk(long key) {
+      this.activityReports.remove(key);
+      this.objectReports.remove(key);this.lightReports.remove(key);this.objectAge=5;
+      int oldHeat = this.chunkScore.remove(key);
+      boolean oldUngrown = this.chunkUngrown.remove(key);
+      int cx = ChunkPos.getX(key), cz = ChunkPos.getZ(key);
+      if (oldHeat > 0) forArea(cx, cz, this.appliedRadius, area -> subtract(this.heat, area, oldHeat));
+      if (oldUngrown) forArea(cx, cz, this.appliedRadius, area -> subtract(this.vetoes, area, 1));
+      this.chunkHasPacket.remove(key);
+      this.scannedChunks.remove(key);
+      this.visible.remove(key);
+      this.visibleDirty = true;
+      // A queued entry may still exist; the tick skips it while its chunk is unloaded.
+   }
+
+   public void tick(Minecraft mc) {
+      if (!config.chunkFinder.enabled || mc.level == null || mc.player == null) {
+         if (lastLevel != null) clear();
+         return;
+      }
+      ClientLevel level = mc.level;
+      ScanKey options = ScanKey.of(config);
+      if (level != this.lastLevel || !options.equals(appliedSettings)) {
+         this.clearAll();
+         this.lastLevel = level;
+         appliedSettings = options;
+         this.queueLoadedChunks();
+      }
+
+      if (level != null) {
+         if (!pendingLight.isEmpty() && !level.getLightEngine().hasLightWork()) {
+            for (long key : pendingLight) enqueue(key);
+            pendingLight.clear();
+         }
+         if (config.chunkFinder.simulationDistance != this.appliedRadius) {
+            this.clearAll();
+            this.queueLoadedChunks();
+         }
+
+         long deadline = System.nanoTime() + 3000000L;
+
+         while (!this.queue.isEmpty() && System.nanoTime() < deadline) {
+            long key = this.queue.dequeueLong();
+            this.queued.remove(key);
+            int cx = ChunkPos.getX(key);
+            int cz = ChunkPos.getZ(key);
+            if (isLoaded(level, cx, cz)) {
+               this.updateChunk(key, level.getChunk(cx, cz), level);
+               this.scannedChunks.add(key);
+               this.visibleDirty = true;
             }
-            var section = sections[active.sectionIndex];
-            if (!active.sectionStarted) {
-                sectionsLeft--;
-                if (section.hasOnlyAir() || !section.maybeHas(settings::isCandidate)) {
-                    active.sectionIndex++;
-                    if (System.nanoTime() >= deadline) break;
-                    continue;
-                }
-                active.sectionStarted = true;
+         }
+
+         if (this.visibleDirty || ++this.visibleAge >= 20) {
+            this.visible = this.computeVisible(level);
+            this.visibleDirty = false;
+            this.visibleAge = 0;
+         }
+         if(++this.objectAge>=5){this.objectAge=0;this.refreshObjects(level);}
+      }
+   }
+
+   private void updateChunk(long key, LevelChunk chunk, ClientLevel level) {
+      scans++;
+      var found=new ArrayList<SuspectObjects.Found>();var summary=new ActivityClues.Summary();
+      int sectionY=chunk.getMinSectionY();
+      for(var section:chunk.getSections()){
+         int baseY=sectionY++*16;
+         if(section!=null&&!section.hasOnlyAir()&&section.maybeHas(s->SuspectObjects.category(s)!=null)){
+            for(int x=0;x<16;x++)for(int y=0;y<16;y++)for(int z=0;z<16;z++){
+               var state=section.getBlockState(x,y,z);var category=SuspectObjects.category(state);
+               if(category==null)continue;
+               if(selectedClue(state))summary.add(state);
+               if(config.chunkFinder.categoryEnabled(category)&&(category!=Category.GROWTH||selectedClue(state)))
+                  found.add(new SuspectObjects.Found(new BlockPos(chunk.getPos().getMinBlockX()+x,baseY+y,chunk.getPos().getMinBlockZ()+z),state,category));
             }
-            int start = active.blockIndex;
-            int end = start + Math.min(blocksLeft, 4096 - start);
-            while (active.blockIndex < end) {
-                int index = active.blockIndex;
-                int x = index & 15;
-                int z = (index >>> 4) & 15;
-                int y = (index >>> 8) & 15;
-                BlockState state = section.getBlockState(x, y, z);
-                if (settings.isCandidate(state)) {
-                    int worldY = active.chunk.getMinY() + active.sectionIndex * 16 + y;
-                    active.observe(state, x, worldY, z, settings);
-                }
-                active.blockIndex++;
-                if ((active.blockIndex & 127) == 0 && System.nanoTime() >= deadline) break;
+         }
+      }
+      if(found.isEmpty())objectReports.remove(key);else objectReports.put(key,List.copyOf(found));
+      if(summary.empty())this.activityReports.remove(key);else this.activityReports.put(key,summary);
+      if(config.chunkFinder.method.equals("Activity clues")){
+         return;
+      }
+      int r = config.chunkFinder.simulationDistance;
+      int cx = ChunkPos.getX(key);
+      int cz = ChunkPos.getZ(key);
+      int oldHeat = this.chunkScore.getOrDefault(key, 0);
+      boolean oldUngrown = this.chunkUngrown.getOrDefault(key, false);
+      if (oldHeat > 0) {
+         forArea(cx, cz, r, area -> subtract(this.heat, area, oldHeat));
+      }
+
+      if (oldUngrown) {
+         forArea(cx, cz, r, area -> subtract(this.vetoes, area, 1));
+      }
+
+      this.chunkHasPacket.put(key, hasBlocksInRange(chunk, -16, 30));
+      ChunkFinderScanner.ChunkScore score = this.scoreChunk(chunk, level);
+      this.chunkScore.put(key, score.selfHeat());
+      this.chunkUngrown.put(key, score.hasUngrown());
+      if (score.hasUngrown()) {
+         forArea(cx, cz, r, area -> this.vetoes.addTo(area, 1));
+      }
+
+      if (score.selfHeat() > 0) {
+         forArea(cx, cz, r, area -> this.heat.addTo(area, score.selfHeat()));
+      }
+   }
+
+   private static void forArea(int cx, int cz, int r, LongConsumer action) {
+      for (int dx = -r; dx <= r; dx++) {
+         for (int dz = -r; dz <= r; dz++) {
+            action.accept(ChunkPos.asLong(cx + dx, cz + dz));
+         }
+      }
+   }
+
+   private static void subtract(Long2IntOpenHashMap map, long key, int amount) {
+      int left = map.get(key) - amount;
+      if (left > 0) {
+         map.put(key, left);
+      } else {
+         map.remove(key);
+      }
+   }
+
+   private static boolean hasBlocksInRange(LevelChunk chunk, int minY, int maxY) {
+      LevelChunkSection[] sections = chunk.getSections();
+      int minSectionY = chunk.getMinSectionY();
+
+      for (int i = 0; i < sections.length; i++) {
+         LevelChunkSection section = sections[i];
+         if (section != null && !section.hasOnlyAir()) {
+            int baseY = minSectionY + i << 4;
+            if (baseY + 15 >= minY && baseY <= maxY) {
+               for (int y = 0; y < 16; y++) {
+                  int worldY = baseY + y;
+                  if (worldY >= minY && worldY <= maxY) {
+                     for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                           if (!section.getBlockState(x, y, z).isAir()) {
+                              return true;
+                           }
+                        }
+                     }
+                  }
+               }
             }
-            blocksLeft -= active.blockIndex - start;
-            if (active.blockIndex == 4096) {
-                active.sectionIndex++;
-                active.blockIndex = 0;
-                active.sectionStarted = false;
+         }
+      }
+
+      return false;
+   }
+
+   private ChunkFinderScanner.ChunkScore scoreChunk(LevelChunk chunk, ClientLevel level) {
+      if (config.chunkFinder.method.equals("ANBS+ Scan")) {
+         var hits=new ArrayList<BlockPos>();
+         int cells=this.glow.scan(level,chunk,pos->{if(hits.size()<2048)hits.add(BlockPos.of(pos));});
+         long key=ChunkPos.asLong(chunk.getPos().x,chunk.getPos().z);
+         if(hits.isEmpty())lightReports.remove(key);else lightReports.put(key,List.copyOf(hits));
+         return new ChunkFinderScanner.ChunkScore(cells / 12, false);
+      } else {
+         LevelChunkSection[] sections = chunk.getSections();
+         int minSectionY = chunk.getMinSectionY();
+         ChunkPos pos = chunk.getPos();
+         boolean paletteOnly = isDonutFolia();
+         int grown = 0;
+         int ungrown = 0;
+         boolean sawBud = false;
+         boolean sawCluster = false;
+         MutableBlockPos cursor = new MutableBlockPos();
+
+         for (int i = 0; i < sections.length; i++) {
+            LevelChunkSection section = sections[i];
+            if (section != null && !section.hasOnlyAir()) {
+               if (paletteOnly) {
+                  if (!sawBud && section.maybeHas(ChunkFinderScanner::isBud)) {
+                     sawBud = true;
+                  }
+
+                  if (!sawCluster && section.maybeHas(statex -> statex.is(Blocks.AMETHYST_CLUSTER))) {
+                     sawCluster = true;
+                  }
+               } else if (section.maybeHas(ChunkFinderScanner::isAmethystGrowth)) {
+                  int baseY = minSectionY + i << 4;
+
+                  for (int x = 0; x < 16; x++) {
+                     for (int y = 0; y < 16; y++) {
+                        for (int z = 0; z < 16; z++) {
+                           BlockState state = section.getBlockState(x, y, z);
+                           if (state.is(Blocks.AMETHYST_CLUSTER)) {
+                              grown++;
+                           } else if (isBud(state) && state.hasProperty(BlockStateProperties.FACING)) {
+                              Direction facing = state.getValue(BlockStateProperties.FACING);
+                              cursor.set(pos.getMinBlockX() + x, baseY + y, pos.getMinBlockZ() + z).move(facing.getOpposite());
+                              if (level.getBlockState(cursor).is(Blocks.BUDDING_AMETHYST)) {
+                                 ungrown++;
+                              } else {
+                                 grown++;
+                              }
+                           }
+                        }
+                     }
+                  }
+               }
             }
-            if (System.nanoTime() >= deadline) break;
-        }
-        if (dirty) publish();
-    }
+         }
 
-    private static LevelChunk loadedChunk(ClientLevel level, int x, int z) {
-        return level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
-    }
-
-    private void rebuildOrder(int x, int z, int radius) {
-        centerX = x;
-        centerZ = z;
-        cursor = 0;
-        if (active != null && !inRange(active.pos.x, active.pos.z, radius)) active = null;
-        visitedThisPass.removeIf(key -> !inRange(ChunkPos.getX(key), ChunkPos.getZ(key), radius));
-        List<ChunkPos> order = new ArrayList<>((radius * 2 + 1) * (radius * 2 + 1));
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                ChunkPos pos = new ChunkPos(x + dx, z + dz);
-                if (!visitedThisPass.contains(pos.toLong())) order.add(pos);
+         if (paletteOnly) {
+            if (sawBud) {
+               ungrown++;
+            } else if (sawCluster) {
+               grown++;
             }
-        }
-        order.sort(Comparator.comparingLong(pos -> distanceSquared(pos.x, pos.z)));
-        scanOrder = List.copyOf(order);
-        publish();
-    }
+         }
 
-    private boolean inRange(int x, int z, int radius) {
-        return Math.abs((long) x - centerX) <= radius && Math.abs((long) z - centerZ) <= radius;
-    }
+         return new ChunkFinderScanner.ChunkScore(grown, ungrown > 0);
+      }
+   }
 
-    private long distanceSquared(int x, int z) {
-        long dx = (long) x - centerX;
-        long dz = (long) z - centerZ;
-        return dx * dx + dz * dz;
-    }
+   private static boolean isBud(BlockState state) {
+      Block block = state.getBlock();
+      return block == Blocks.SMALL_AMETHYST_BUD || block == Blocks.MEDIUM_AMETHYST_BUD || block == Blocks.LARGE_AMETHYST_BUD;
+   }
 
-    private boolean finishScan(ScanSettings settings) {
-        long key = active.pos.toLong();
-        FoundChunk found = active.result(settings);
-        if (found.score() < thresholdForSensitivity(settings.sensitivity())) {
-            return detections.remove(key) != null;
-        }
-        if (!detections.containsKey(key) && detections.size() >= MAX_TARGETS) {
-            var farthest = detections.entrySet().stream().max(Comparator.comparingLong(entry -> {
-                FoundChunk result = entry.getValue().result();
-                return distanceSquared(result.chunkX(), result.chunkZ());
-            })).orElseThrow();
-            FoundChunk previous = farthest.getValue().result();
-            if (distanceSquared(found.chunkX(), found.chunkZ())
-                    >= distanceSquared(previous.chunkX(), previous.chunkZ())) return false;
-            detections.remove(farthest.getKey());
-        }
-        Detection previous = detections.put(key, new Detection(active.chunk, found));
-        return previous == null || !found.equals(previous.result());
-    }
+   private static boolean isAmethystGrowth(BlockState state) {
+      return state.is(Blocks.AMETHYST_CLUSTER) || isBud(state);
+   }
 
-    private void publish() {
-        List<FoundChunk> found = new ArrayList<>(detections.size());
-        for (Detection detection : detections.values()) found.add(detection.result());
-        found.sort(Comparator.comparingLong((FoundChunk result) -> distanceSquared(result.chunkX(), result.chunkZ()))
-                .thenComparing(Comparator.comparingInt(FoundChunk::score).reversed())
-                .thenComparingInt(FoundChunk::chunkX).thenComparingInt(FoundChunk::chunkZ));
-        targets = List.copyOf(found);
-    }
+   private static boolean isDonutFolia() {
+      ClientPacketListener connection = Minecraft.getInstance().getConnection();
+      if (connection == null) {
+         return false;
+      } else {
+         String brand = connection.serverBrand();
+         return brand != null && brand.contains("DonutFolia");
+      }
+   }
 
-    private record Detection(LevelChunk chunk, FoundChunk result) {}
+   private Long2IntOpenHashMap computeVisible(ClientLevel level) {
+      if(config.chunkFinder.method.equals("Activity clues")){
+         var result=new Long2IntOpenHashMap();
+         this.activityReports.forEach((key,report)->{
+            if(isLoaded(level,ChunkPos.getX(key),ChunkPos.getZ(key))&&(report.score()>=config.chunkFinder.clueThreshold||(!config.chunkFinder.smartAdjustment)))result.put(key.longValue(),report.score());
+         });return result;
+      }
+      Long2IntOpenHashMap eligible = new Long2IntOpenHashMap();
+      ObjectIterator withPacket = this.heat.long2IntEntrySet().iterator();
 
-    private record ScanSettings(int radius, int sensitivity, boolean smart, boolean kelp,
-                                boolean caveVines, boolean vines, boolean amethyst,
-                                boolean bamboo, boolean cocoa, boolean beeNest) {
-        static ScanSettings of(ChunkFinderSettings settings) {
-            return new ScanSettings(Math.clamp(settings.simulationDistance, 2, 16),
-                    Math.clamp(settings.sensitivity, 1, 5), settings.smartAdjustment,
-                    settings.kelp, settings.caveVines, settings.vines, settings.amethyst,
-                    settings.bamboo, settings.cocoa, settings.beeNest);
-        }
-
-        boolean hasFilters() { return kelp || caveVines || vines || amethyst || bamboo || cocoa || beeNest; }
-
-        boolean isCandidate(BlockState state) {
-            return (kelp && state.is(Blocks.KELP))
-                    || (caveVines && state.is(Blocks.CAVE_VINES))
-                    || (vines && state.is(Blocks.VINE))
-                    || (amethyst && (state.is(Blocks.AMETHYST_BLOCK) || state.is(Blocks.BUDDING_AMETHYST)
-                        || state.is(Blocks.SMALL_AMETHYST_BUD) || state.is(Blocks.MEDIUM_AMETHYST_BUD)
-                        || state.is(Blocks.LARGE_AMETHYST_BUD) || state.is(Blocks.AMETHYST_CLUSTER)))
-                    || (bamboo && state.is(Blocks.BAMBOO))
-                    || (cocoa && state.is(Blocks.COCOA))
-                    || (beeNest && state.is(Blocks.BEE_NEST));
-        }
-    }
-
-    private static final class ScanWork {
-        final LevelChunk chunk;
-        final ChunkPos pos;
-        final int[] points = new int[EvidenceKind.values().length];
-        final int[] lowest = new int[EvidenceKind.values().length];
-        final int[] highest = new int[EvidenceKind.values().length];
-        final BitSet evidenceHeights = new BitSet();
-        final BlockPos.MutableBlockPos neighbor = new BlockPos.MutableBlockPos();
-        int sectionIndex;
-        int blockIndex;
-        boolean sectionStarted;
-        boolean amethystGrowth;
-
-        ScanWork(LevelChunk chunk, ChunkPos pos) { this.chunk = chunk; this.pos = pos; }
-
-        FoundChunk result(ScanSettings settings) {
-            int total = 0;
-            int minY = Integer.MAX_VALUE;
-            int maxY = Integer.MIN_VALUE;
-            EnumSet<EvidenceKind> kinds = EnumSet.noneOf(EvidenceKind.class);
-            for (EvidenceKind kind : EvidenceKind.values()) {
-                int index = kind.ordinal();
-                if (points[index] == 0) continue;
-                int score = points[index];
-                // Maximum sensitivity also accepts the first growth stage of a lone bud.
-                if (kind == EvidenceKind.AMETHYST && settings.sensitivity() == 5 && amethystGrowth) {
-                    score = Math.max(score, thresholdForSensitivity(5));
-                }
-                total += score;
-                minY = Math.min(minY, lowest[index]);
-                maxY = Math.max(maxY, highest[index]);
-                kinds.add(kind);
+      while (withPacket.hasNext()) {
+         Entry entry = (Entry)withPacket.next();
+         long key = entry.getLongKey();
+         if (!this.vetoes.containsKey(key)) {
+            int cx = ChunkPos.getX(key);
+            int cz = ChunkPos.getZ(key);
+            if (isLoaded(level, cx, cz) && this.scannedNeighbours(cx, cz) >= 3) {
+               eligible.put(key, entry.getIntValue());
             }
-            List<FoundChunk.Layer> layers = new ArrayList<>();
-            int chunkMinY = chunk.getMinY();
-            for (int start = evidenceHeights.nextSetBit(0); start >= 0;) {
-                int end = evidenceHeights.nextClearBit(start) - 1;
-                layers.add(new FoundChunk.Layer(chunkMinY + start, chunkMinY + end));
-                start = evidenceHeights.nextSetBit(end + 1);
-            }
-            return new FoundChunk(pos.x, pos.z, minY, maxY, total, kinds, layers);
-        }
+         }
+      }
 
-        void observe(BlockState state, int x, int y, int z, ScanSettings settings) {
-            EvidenceKind kind;
-            int strength;
-            if (state.is(Blocks.KELP)) {
-                kind = EvidenceKind.KELP;
-                int age = state.getValue(GrowingPlantHeadBlock.AGE);
-                // Generated kelp tips start at ages 20..23.
-                strength = age < 20 || age == 25 ? 3 : age == 24 ? 1 : settings.smart() ? 0 : 1;
-            } else if (state.is(Blocks.CAVE_VINES)) {
-                kind = EvidenceKind.CAVE_VINES;
-                // Ages 23..25 and berries both occur during lush-cave generation.
-                strength = state.getValue(GrowingPlantHeadBlock.AGE) < 23 ? 3 : settings.smart() ? 0 : 1;
-            } else if (state.is(Blocks.VINE)) {
-                kind = EvidenceKind.VINES;
-                strength = hasConstructedSupport(x, y, z) ? 3 : settings.smart() ? 0 : 1;
-            } else if (state.is(Blocks.BAMBOO)) {
-                kind = EvidenceKind.BAMBOO;
-                strength = state.getValue(BambooStalkBlock.AGE) == 0 ? 3 : settings.smart() ? 0 : 1;
-            } else if (state.is(Blocks.COCOA)) {
-                kind = EvidenceKind.COCOA;
-                int age = state.getValue(CocoaBlock.AGE);
-                strength = age == 2 ? 3 : age == 1 ? 1 : settings.smart() ? 0 : 1;
-            } else if (state.is(Blocks.BEE_NEST)) {
-                kind = EvidenceKind.BEE_NEST;
-                int honey = state.getValue(BeehiveBlock.HONEY_LEVEL);
-                strength = honey > 0 ? honey + 1 : settings.smart() ? 0 : 1;
-            } else {
-                kind = EvidenceKind.AMETHYST;
-                if (!state.is(Blocks.AMETHYST_BLOCK) && !state.is(Blocks.BUDDING_AMETHYST)) amethystGrowth = true;
-                strength = state.is(Blocks.AMETHYST_CLUSTER) ? 4
-                        : state.is(Blocks.LARGE_AMETHYST_BUD) ? 3
-                        : state.is(Blocks.MEDIUM_AMETHYST_BUD) ? 2
-                        : state.is(Blocks.SMALL_AMETHYST_BUD) ? 1 : settings.smart() ? 0 : 1;
-            }
-            if (strength == 0) return;
-            evidenceHeights.set(y - chunk.getMinY());
-            int index = kind.ordinal();
-            if (points[index] == 0) {
-                lowest[index] = y;
-                highest[index] = y;
-            }
-            points[index] = Math.min(MAX_SCORE_PER_KIND, points[index] + strength);
-            lowest[index] = Math.min(lowest[index], y);
-            highest[index] = Math.max(highest[index], y);
-        }
+      int withPacketx = config.chunkFinder.sensitivity;
+      int reach = this.appliedRadius;
+      Long2IntOpenHashMap kept = new Long2IntOpenHashMap();
+      ObjectIterator var6 = eligible.long2IntEntrySet().iterator();
 
-        private boolean hasConstructedSupport(int x, int y, int z) {
-            // Read only this chunk; unknown support across an unloaded boundary is not evidence.
-            return (x > 0 && constructed(chunk.getBlockState(neighbor.set(pos.getMinBlockX() + x - 1, y, pos.getMinBlockZ() + z))))
-                    || (x < 15 && constructed(chunk.getBlockState(neighbor.set(pos.getMinBlockX() + x + 1, y, pos.getMinBlockZ() + z))))
-                    || (z > 0 && constructed(chunk.getBlockState(neighbor.set(pos.getMinBlockX() + x, y, pos.getMinBlockZ() + z - 1))))
-                    || (z < 15 && constructed(chunk.getBlockState(neighbor.set(pos.getMinBlockX() + x, y, pos.getMinBlockZ() + z + 1))));
-        }
+      while (var6.hasNext()) {
+         Entry entry = (Entry)var6.next();
+         long key = entry.getLongKey();
+         int value = entry.getIntValue();
+         int threshold = this.chunkHasPacket.getOrDefault(key, true) ? withPacketx : 1;
+         if (value >= threshold && isPeak(eligible, key, value, reach)) {
+            kept.put(key, value);
+         }
+      }
 
-        private static boolean constructed(BlockState state) {
-            return state.is(BlockTags.PLANKS) || state.is(Blocks.BRICKS) || state.is(Blocks.STONE_BRICKS)
-                    || state.is(Blocks.GLASS) || state.is(Blocks.SMOOTH_STONE)
-                    || state.is(Blocks.POLISHED_ANDESITE) || state.is(Blocks.POLISHED_DIORITE)
-                    || state.is(Blocks.POLISHED_GRANITE);
-        }
-    }
+      return kept;
+   }
+
+   private static boolean isPeak(Long2IntOpenHashMap field, long key, int value, int reach) {
+      int cx = ChunkPos.getX(key);
+      int cz = ChunkPos.getZ(key);
+
+      for (int dx = -reach; dx <= reach; dx++) {
+         for (int dz = -reach; dz <= reach; dz++) {
+            if ((dx != 0 || dz != 0) && field.get(ChunkPos.asLong(cx + dx, cz + dz)) > value) {
+               return false;
+            }
+         }
+      }
+
+      return true;
+   }
+
+   private int scannedNeighbours(int cx, int cz) {
+      int count = 0;
+
+      for (int dx = -1; dx <= 1; dx++) {
+         for (int dz = -1; dz <= 1; dz++) {
+            if ((dx != 0 || dz != 0) && this.scannedChunks.contains(ChunkPos.asLong(cx + dx, cz + dz))) {
+               count++;
+            }
+         }
+      }
+
+      return count;
+   }
+
+   private void refreshObjects(ClientLevel level) {
+      var mc=Minecraft.getInstance();if(mc.player==null)return;
+      Vec3 eye=mc.player.getEyePosition();double rangeSq=config.chunkFinder.objectRange*config.chunkFinder.objectRange;
+      var candidates=new ArrayList<SuspectObjects.Found>();
+      var geodes=new HashMap<BlockPos,SuspectObjects.Found>();
+      var plants=new HashMap<BlockPos,SuspectObjects.Found>();
+      for(var entry:objectReports.entrySet()){
+         long key=entry.getKey();if(!isLoaded(level,ChunkPos.getX(key),ChunkPos.getZ(key)))continue;
+         for(var found:entry.getValue()){
+            if(Vec3.atCenterOf(found.pos()).distanceToSqr(eye)>rangeSq)continue;
+            if(found.category()==Category.GROWTH){
+               var kind=ActivityClues.kind(found.state());
+               if(kind==ActivityClues.Kind.KELP||kind==ActivityClues.Kind.VINES||kind==ActivityClues.Kind.CAVE_VINES||kind==ActivityClues.Kind.BAMBOO){plants.put(found.pos(),found);continue;}
+               var clue=new ActivityClues.Summary();clue.add(found.state());
+               var chunkReport=activityReports.get(key);
+               if(config.chunkFinder.smartAdjustment&&(clue.score()==0||chunkReport==null||chunkReport.score()<config.chunkFinder.clueThreshold))continue;
+            }
+            if(found.category()==Category.GEODES){
+               if(config.chunkFinder.clueEnabled(ActivityClues.Kind.AMETHYST))geodes.put(found.pos(),found);
+            }else candidates.add(found);
+         }
+      }
+      candidates.sort(Comparator.comparingDouble(f->Vec3.atCenterOf(f.pos()).distanceToSqr(eye)));
+      detailLimited=candidates.size()>2048;
+      var next=new ArrayList<SuspectObjects.Marker>();
+      for(int i=0;i<Math.min(2048,candidates.size());i++)next.add(SuspectObjects.block(candidates.get(i),level));
+      next.addAll(SuspectObjects.geodes(geodes,config.chunkFinder.matureClusters,config.chunkFinder.maturePercent,(!config.chunkFinder.smartAdjustment)));
+      next.addAll(SuspectObjects.plants(plants,kind->switch(kind){case KELP->config.chunkFinder.kelpLength;case VINES->config.chunkFinder.vineLength;case CAVE_VINES->config.chunkFinder.caveVineLength;case BAMBOO->config.chunkFinder.bambooLength;default->Integer.MAX_VALUE;},(!config.chunkFinder.smartAdjustment)));
+      if(config.chunkFinder.categoryEnabled(Category.DISPLAYS))for(var entity:level.entitiesForRendering()){
+         net.minecraft.world.item.Item icon=null;
+         if(entity instanceof net.minecraft.world.entity.decoration.ArmorStand)icon=net.minecraft.world.item.Items.ARMOR_STAND;
+         else if(entity instanceof net.minecraft.world.entity.decoration.ItemFrame)icon=net.minecraft.world.item.Items.ITEM_FRAME;
+         if(icon!=null&&entity.isAlive()&&entity.distanceToSqr(eye)<=rangeSq){
+            var box=entity.getBoundingBox();next.add(new SuspectObjects.Marker(box,List.of(box),Category.DISPLAYS,Map.of(SuspectObjects.Icon.item(icon),1),icon.getDefaultInstance().getHoverName().getString()));
+         }
+      }
+      if(config.chunkFinder.method.equals("ANBS+ Scan")&&config.chunkFinder.categoryEnabled(Category.ANOMALIES))for(var entry:lightReports.entrySet()){
+         if(!visible.containsKey(entry.getKey()))continue;
+         for(var pos:entry.getValue())if(Vec3.atCenterOf(pos).distanceToSqr(eye)<=rangeSq){
+            var box=new AABB(pos);next.add(new SuspectObjects.Marker(box,List.of(box),Category.ANOMALIES,Map.of(SuspectObjects.Icon.item(net.minecraft.world.item.Items.AMETHYST_SHARD),1),"Light anomaly"));
+         }
+      }
+      next.sort(Comparator.comparingDouble(m->m.bounds().distanceToSqr(eye)));
+      if(next.size()>2048){detailLimited=true;next.subList(2048,next.size()).clear();}
+      markers=List.copyOf(next);
+   }
+
+   private boolean selectedClue(BlockState state){var kind=ActivityClues.kind(state);return kind!=null&&config.chunkFinder.clueEnabled(kind);}
+   private void blockChanged(net.minecraft.core.BlockPos pos,BlockState state){
+      long key=ChunkPos.asLong(pos.getX()>>4,pos.getZ()>>4);
+      if(config.chunkFinder.method.equals("Activity clues")) {
+         if(this.activityReports.containsKey(key)||this.objectReports.containsKey(key)||SuspectObjects.category(state)!=null)this.enqueue(key);
+      } else {
+         this.enqueue(key);
+         // A bud can attach to a support block in the adjacent chunk. Removing or
+         // replacing that support changes the bud's classification there too.
+         int cx=pos.getX()>>4, cz=pos.getZ()>>4;
+         if((pos.getX()&15)==0)this.enqueue(ChunkPos.asLong(cx-1,cz));
+         if((pos.getX()&15)==15)this.enqueue(ChunkPos.asLong(cx+1,cz));
+         if((pos.getZ()&15)==0)this.enqueue(ChunkPos.asLong(cx,cz-1));
+         if((pos.getZ()&15)==15)this.enqueue(ChunkPos.asLong(cx,cz+1));
+      }
+   }
+
+      private record ChunkScore(int selfHeat, boolean hasUngrown) {
+   }
+   private record ScanKey(String method, int radius, int clues, int categories) {
+      static ScanKey of(ClientConfig config) {
+         var settings = config.chunkFinder;
+         int clues = 0, categories = 0;
+         for (var kind : ActivityClues.Kind.values()) if (settings.clueEnabled(kind)) clues |= 1 << kind.ordinal();
+         for (var category : Category.values()) if (settings.categoryEnabled(category)) categories |= 1 << category.ordinal();
+         return new ScanKey(settings.method, settings.simulationDistance, clues, categories);
+      }
+   }
+
 }

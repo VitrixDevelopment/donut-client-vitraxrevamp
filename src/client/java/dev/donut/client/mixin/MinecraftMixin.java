@@ -18,11 +18,11 @@ abstract class MinecraftMixin {
 
     @Inject(method = {"startUseItem", "pickBlock", "continueAttack"}, at = @At("HEAD"), cancellable = true)
     private void donut$blockInteractions(CallbackInfo ci) {
-        if (FreecamController.enabled() || AutoBuilderController.get().isRunning()) ci.cancel();
+        if (FreecamController.enabled() || AutoBuilderController.get().isRunning() || dev.donut.client.spectrebuilder.BuilderPlacement.placing()) ci.cancel();
     }
 
     @Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
     private void donut$blockAttack(CallbackInfoReturnable<Boolean> cir) {
-        if (FreecamController.enabled() || AutoBuilderController.get().isRunning()) cir.setReturnValue(false);
+        if (FreecamController.enabled() || AutoBuilderController.get().isRunning() || dev.donut.client.spectrebuilder.BuilderPlacement.placing()) cir.setReturnValue(false);
     }
 }

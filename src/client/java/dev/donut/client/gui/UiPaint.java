@@ -153,6 +153,13 @@ final class UiPaint {
         SmoothGeometry.closedStroke(g, path, 1.15f * size / 15, withOpacity(color));
     }
 
+    static void caution(GuiGraphics g, int x, int y, int color) {
+        float[] triangle = {x + 8.5f, y + 1.5f, x + 16.5f, y + 16f, x + .5f, y + 16f};
+        SmoothGeometry.closedStroke(g, triangle, 1.15f, withOpacity(color));
+        round(g, x + 7.75f, y + 6, 1.5f, 5, .75f, color);
+        round(g, x + 7.75f, y + 12.5f, 1.5f, 1.5f, .75f, color);
+    }
+
     static void cube(GuiGraphics g, int x, int y, int size, int color, double outlineAlpha, double fillAlpha) {
         int dx = size / 3, dy = size / 4;
         round(g, x, y + dy, size, size, 1, alpha(color, fillAlpha));

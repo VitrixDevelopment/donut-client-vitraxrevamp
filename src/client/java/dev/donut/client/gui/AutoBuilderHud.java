@@ -17,7 +17,7 @@ public final class AutoBuilderHud {
         int y = 12;
         String status = "AutoBuilder  " + builder.status().name().toLowerCase(java.util.Locale.ROOT)
                 + "  " + Math.round(builder.progress() * 100) + "%";
-        String reason = builder.reason();
+        String reason = dev.donut.client.spectrebuilder.BuilderPlacement.placing() ? dev.donut.client.spectrebuilder.BuilderPlacement.hint() : builder.reason();
         while (UiPaint.width(font, reason) > 300 && reason.length() > 4)
             reason = reason.substring(0, reason.length() - 4) + "...";
         int w = Math.max(210, Math.max(UiPaint.width(font, status), UiPaint.width(font, reason)) + 20);

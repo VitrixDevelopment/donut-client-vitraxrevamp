@@ -70,7 +70,7 @@ public final class FullbrightGameTest implements FabricClientGameTest {
                 require(GuiTestInput.visible(context, "module5"), "Fullbright is missing from Visual modules");
                 setEnabled(context, store, false);
                 if (store.load().fullbright.favorite) GuiTestInput.click(context, "favorite5");
-                GuiTestInput.assertExpansionReverses(context, MODULE);
+                GuiTestInput.assertSelectionAnimation(context, MODULE);
                 GuiTestInput.rightClick(context, "module5");
                 require(!store.load().fullbright.enabled, "Opening Fullbright settings activated it");
                 screenshot(context, "fullbright-01-settings");
@@ -190,6 +190,8 @@ public final class FullbrightGameTest implements FabricClientGameTest {
         context.getInput().pressKey(open);
         context.waitForScreen(DonutScreen.class);
         GuiTestInput.settle(context);
+        GuiTestInput.click(context, "tab0");
+        GuiTestInput.reveal(context, "module5");
     }
 
     private static void setEnabled(ClientGameTestContext context, ConfigStore store, boolean enabled) {

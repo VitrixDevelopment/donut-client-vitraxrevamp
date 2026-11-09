@@ -39,6 +39,7 @@ public final class ChunkFinderGuiGameTest implements FabricClientGameTest {
             world.getServer().runCommand("tp @a 0.5 65 0.5");
             context.waitTicks(3);
             GuiTestInput.openAnimated(context, () -> new DonutScreen(config, saves::incrementAndGet));
+            GuiTestInput.click(context, "tab0");
             require(GuiTestInput.visible(context, "module4"), "Base Finder is missing from Visual modules");
             require(!GuiTestInput.visible(context, "m4.simulationDistance"), "Base Finder must start collapsed");
             context.runOnClient(client -> {
@@ -49,7 +50,7 @@ public final class ChunkFinderGuiGameTest implements FabricClientGameTest {
                 require(Component.translatable(ModuleKeybinds.mapping(4).getName()).getString().equals("Toggle Base Finder"),
                         "Minecraft's controls menu still displays the former Chunk Finder name");
             });
-            GuiTestInput.assertExpansionReverses(context, 4);
+            GuiTestInput.assertSelectionAnimation(context, 4);
             GuiTestInput.rightClick(context, "module4");
             require(!config.chunkFinder.enabled && saves.get() == 0,
                     "Opening Base Finder settings changed or saved its activation state");
@@ -59,12 +60,40 @@ public final class ChunkFinderGuiGameTest implements FabricClientGameTest {
             GuiTestInput.click(context, "m4.alpha");
             context.runOnClient(client -> {
                 require(config.chunkFinder.simulationDistance == 9, "Simulation Distance slider did not update");
-                require(config.chunkFinder.sensitivity == 3, "Sensitivity slider did not update");
+                require(config.chunkFinder.sensitivity == 11, "Sensitivity slider did not update");
                 require(Math.abs(config.chunkFinder.alpha - 128) <= 1, "Alpha slider did not update");
             });
             GuiTestInput.click(context, "m4.smartAdjustment");
             require(!config.chunkFinder.smartAdjustment, "Smart Adjustment toggle did not update");
+            GuiTestInput.click(context, "m4.method1");
+            require(config.chunkFinder.method.equals("ANBS+ Scan"), "ANBS method did not select");
+            GuiTestInput.click(context, "m4.method2");
+            require(config.chunkFinder.method.equals("Activity clues"), "Activity method did not select");
+            require(!GuiTestInput.visible(context, "m4.sensitivity"), "Activity mode retained the packet threshold");
+            GuiTestInput.click(context, "m4.clueThreshold");
+            GuiTestInput.click(context, "m4.method0");
+            require(config.chunkFinder.method.equals("Classic"), "Classic method did not restore");
+            GuiTestInput.click(context, "m4.inspectPanel");
+            require(!config.chunkFinder.inspectPanel, "Inspection setting did not toggle");
+            GuiTestInput.click(context, "m4.inspectPanel");
+            GuiTestInput.click(context, "m4.objectRange");
+            GuiTestInput.click(context,"m4.colorPanel top color");
+            GuiTestInput.click(context,"hex"); GuiTestInput.type(context,"292C3B");
+            GuiTestInput.click(context,"colorDone");
+            require(config.chunkFinder.panelTopColor==0x292C3B,"Discovery top color did not edit");
+            GuiTestInput.click(context,"m4.colorPanel bottom color");
+            GuiTestInput.click(context,"hex"); GuiTestInput.type(context,"171A21");
+            GuiTestInput.click(context,"colorDone");
+            require(config.chunkFinder.panelBottomColor==0x171A21,"Discovery bottom color did not edit");
+            GuiTestInput.click(context,"m4.panelOpacity");
+            require(Math.abs(config.chunkFinder.panelOpacity-.6)<.001,"Discovery opacity did not edit");
+            screenshot(context,"dark-discovery-panel-controls");
+            GuiTestInput.click(context, "m4.maturePercent");
+            GuiTestInput.click(context, "m4.objects-hoppers");
+            require(!config.chunkFinder.categoryEnabled(dev.donut.client.chunkfinder.SuspectObjects.Category.HOPPERS), "Object category did not toggle");
+            GuiTestInput.click(context, "m4.objects-hoppers");
             GuiTestInput.scrollTop(context);
+            GuiTestInput.click(context,"m4.method0");
             screenshot(context, "basefinder-01-settings");
 
             for (String filter : new String[] {"kelp", "caveVines", "vines", "amethyst", "bamboo", "cocoa", "beeNest"}) {

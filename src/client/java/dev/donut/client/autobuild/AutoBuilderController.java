@@ -41,6 +41,8 @@ public final class AutoBuilderController {
     private int tick, scanIndex, cooldown, noProgress, revalidateIndex, finalCheckIndex, originalSlot = -1;
     private boolean scanned;
     private String lastFailure = "";
+    private boolean spectreExecution;
+    private final dev.donut.client.spectrebuilder.CreativeBuilder creative = dev.donut.client.spectrebuilder.CreativeBuilder.INSTANCE;
 
     private record Target(BlockPos pos, BlockState state, int index, boolean support) { }
     private record Prepared(Target target, PlacementPlanner.Plan plan, int readyTick) { }
@@ -60,11 +62,11 @@ public final class AutoBuilderController {
     public PlacementTransform transform() { return transform; }
     public boolean previewVisible() { return previewVisible; }
     public void setPreviewVisible(boolean value) { previewVisible = value && schematic != null; }
-    public Status status() { return status; }
-    public String reason() { return reason; }
-    public boolean isRunning() { return status == Status.RUNNING; }
-    public int confirmedBlocks() { return correct.cardinality(); }
-    public double progress() { return targets.isEmpty() ? 0 : (double)correct.cardinality()/targets.size(); }
+    public Status status() { return spectreExecution ? creative.running() ? creative.paused() ? Status.PAUSED : Status.RUNNING : creative.status().startsWith("Complete:") ? Status.COMPLETED : Status.READY : status; }
+    public String reason() { return spectreExecution ? creative.status() : reason; }
+    public boolean isRunning() { return status() == Status.RUNNING; }
+    public int confirmedBlocks() { return spectreExecution ? creative.completed() : correct.cardinality(); }
+    public double progress() { return spectreExecution ? creative.total() == 0 ? 0 : (double)creative.completed()/creative.total() : targets.isEmpty() ? 0 : (double)correct.cardinality()/targets.size(); }
     public int supportsPlaced() { return supportBlocks.size(); }
 
     public void setSchematic(Schematic value) {
@@ -94,6 +96,8 @@ public final class AutoBuilderController {
         work.addAll(values);
     }
     public void start() {
+        if (creative.running()) creative.stop();
+        spectreExecution=false;
         Minecraft client=Minecraft.getInstance();
         if (schematic == null || targets.isEmpty()) { reason="Load a schematic containing blocks."; return; }
         if (!canRun(client)) return;
@@ -104,12 +108,29 @@ public final class AutoBuilderController {
         originalSlot=client.player.getInventory().getSelectedSlot(); status=Status.RUNNING; previewVisible=true;
         reason="Checking loaded blocks...";
     }
-    public void pause() { pauseWith("Paused by you."); }
+    /** Spectre's grounded Creative executor, fed the same transformed cells as the native preview. */
+    public void startSpectre() {
+        cancel();
+        dev.donut.client.spectrebuilder.BuilderPlacement.stop();
+        Minecraft client=Minecraft.getInstance();
+        if (schematic == null || targets.isEmpty()) { reason="Load a schematic containing blocks."; return; }
+        if (!canRun(client)) return;
+        try {
+            List<dev.donut.client.spectrebuilder.Schematic.Block> blocks=new ArrayList<>();
+            for (Target target:targets) blocks.add(new dev.donut.client.spectrebuilder.Schematic.Block(
+                    new dev.donut.client.spectrebuilder.Schematic.Pos(target.pos.getX(),target.pos.getY(),target.pos.getZ()),
+                    dev.donut.client.spectrebuilder.BuilderBridge.stateText(target.state)));
+            creative.start(List.copyOf(blocks),new dev.donut.client.spectrebuilder.Schematic.Pos(0,0,0),0);
+            spectreExecution=true; previewVisible=true;
+        } catch (IllegalArgumentException | IllegalStateException e) { reason=e.getMessage(); }
+    }
+    public void pause() { if (spectreExecution) { if (creative.running()&&!creative.paused()) creative.pause(); } else pauseWith("Paused by you."); }
     private void pauseWith(String message) {
         if (status != Status.RUNNING && status != Status.PAUSED) { reason=message; return; }
         status=Status.PAUSED; reason=message; prepared=null; navigator.release(); restoreSlot();
     }
     public void resume() {
+        if (spectreExecution) { if (creative.running()&&creative.paused()) creative.pause(); else startSpectre(); return; }
         if (status != Status.PAUSED) { start(); return; }
         Minecraft client=Minecraft.getInstance();
         if (!canRun(client)) return;
@@ -127,11 +148,16 @@ public final class AutoBuilderController {
         return true;
     }
     public void cancel() {
+        if (creative.running()) creative.stop();
+        spectreExecution=false;
         navigator.reset(); restoreSlot(); current=null; prepared=null; pending=null; session=null;
         failures.clear(); deferred.clear(); cooldown=0;
         status=schematic == null ? Status.IDLE : Status.READY; reason="Build cancelled.";
     }
     public void disconnect() {
+        dev.donut.client.spectrebuilder.BuilderPlacement.stop();
+        if (creative.running()) creative.stop();
+        spectreExecution=false;
         if (isRunning() || status==Status.PAUSED) { pauseWith("Disconnected. Rejoin, check the position, then Resume."); }
         navigator.reset(); restoreSlot(); session=null; pending=null; prepared=null; current=null; correct.clear(); scanIndex=0; scanned=false;
         unconfirmed.clear(); predictionLevel=null;
@@ -144,7 +170,7 @@ public final class AutoBuilderController {
     }
 
     public void tick(Minecraft client) {
-        if (!isRunning()) return;
+        if (spectreExecution || status != Status.RUNNING) return;
         tick++;
         for (var key:List.of(client.options.keyAttack,client.options.keyUse,client.options.keyDrop,client.options.keySwapOffhand)) {
             key.setDown(false); while (key.consumeClick()) { }

@@ -1,226 +1,120 @@
 package dev.donut.client.gametest;
 
 import dev.donut.client.config.ClientConfig;
-import dev.donut.client.config.RenderMode;
-import dev.donut.client.finder.FinderScanner;
-import dev.donut.client.finder.FoundBlock;
-import dev.donut.client.finder.TargetKind;
 import dev.donut.client.gui.DonutScreen;
-import dev.donut.client.render.HighlightRenderer;
-import java.util.EnumSet;
-import java.util.Locale;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.nio.file.Path;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.screenshot.TestScreenshotOptions;
 
-/** Exercises real GUI input, loaded block entities, and every overlay pipeline in a disposable flat world. */
+/** Exercises real GUI input, remaining module controls and presentation in a disposable flat world. */
 public final class DonutClientGameTest implements FabricClientGameTest {
-    private static final EnumSet<TargetKind> ALL_KINDS = EnumSet.allOf(TargetKind.class);
 
     @Override
     public void runTest(ClientGameTestContext context) {
         ClientConfig config = new ClientConfig();
-        config.storage.distanceFade = false;
-        config.spawner.distanceFade = false;
-        FinderScanner scanner = new FinderScanner(config);
-        AtomicBoolean active = new AtomicBoolean(true);
         AtomicInteger saves = new AtomicInteger();
-        HighlightRenderer renderer = context.computeOnClient(client -> {
-            client.options.guiScale().set(1);
-            HighlightRenderer created = new HighlightRenderer(config, scanner);
-            created.register();
-            ClientTickEvents.END_CLIENT_TICK.register(mc -> {
-                if (active.get()) scanner.tick(mc);
-            });
-            return created;
-        });
-        context.getInput().resizeWindow(1280, 800);
-
+        context.getInput().resizeWindow(1920, 1080);
         try (var world = context.worldBuilder().create()) {
-            createFixtures(world.getServer());
+            world.getServer().runCommand("gamemode creative @a");
+            world.getServer().runCommand("fill -16 64 -8 16 64 16 minecraft:smooth_stone");
+            createGlassScene(world.getServer());
             context.waitTicks(5);
             world.getClientWorld().waitForChunksRender();
-            context.waitFor(client -> client.player != null && Math.abs(client.player.getY() - 65) < 0.1);
-            context.runOnClient(client -> require(scanner.snapshot().isEmpty(), "Disabled modules must not find targets"));
-            screenshot(context, "donut-00-fixtures-disabled");
-
-            // Use the production screen and mouse event path; all changes stay in the test's config.
             GuiTestInput.openAnimated(context, () -> new DonutScreen(config, saves::incrementAndGet));
-            require(!GuiTestInput.visible(context, "m0.modeOUTLINE"), "Module settings must start collapsed");
-            GuiTestInput.assertExpansionReverses(context, 0);
-            GuiTestInput.rightClick(context, "module0");
-            require(GuiTestInput.visible(context, "m0.modeOUTLINE"), "Right-click did not open inline settings");
-            context.runOnClient(client -> require(!config.storage.enabled,
-                    "Opening settings must not activate the module"));
-            require(saves.get() == 0, "Opening settings must not save an unchanged config");
-            GuiTestInput.rightClick(context, "module0");
-            require(!GuiTestInput.visible(context, "m0.modeOUTLINE"), "Repeated right-click did not collapse settings");
-            context.runOnClient(client -> require(!config.storage.enabled,
-                    "Collapsing settings must not activate the module"));
-            GuiTestInput.click(context, "module0"); // Clicking the card name toggles its module.
-            GuiTestInput.click(context, "enable1"); // The explicit switch works independently.
-            require(!GuiTestInput.visible(context, "m0.modeOUTLINE"), "Left-clicking a card must keep settings collapsed");
-            context.runOnClient(client -> require(config.storage.enabled && config.spawner.enabled,
-                    "Module toggles did not update the supplied config"));
-            require(saves.get() >= 2, "Changing module toggles must invoke the save callback");
-            awaitKinds(context, scanner, ALL_KINDS);
-            screenshot(context, "donut-01-clickgui-modules");
-
-            GuiTestInput.rightClick(context, "module0");
-            GuiTestInput.rightClick(context, "module1");
-            require(GuiTestInput.visible(context, "m0.modeOUTLINE")
-                            && GuiTestInput.visible(context, "m1.modeOUTLINE"),
-                    "Opening a second card must preserve the first card's inline settings");
-            int savesBeforeSettings = saves.get();
-            GuiTestInput.click(context, "m0.modeOUTLINE");
-            context.runOnClient(client -> require(config.storage.mode == RenderMode.OUTLINE,
-                    "Render mode button did not select Outline"));
-            GuiTestInput.click(context, "m0.outlineOpacity"); // Slider midpoint is 50%.
-            context.runOnClient(client -> require(Math.abs(config.storage.outlineOpacity - 0.5) < 0.02,
-                    "Opacity slider did not update the setting"));
-            require(saves.get() >= savesBeforeSettings + 2, "Changing inline settings must invoke the save callback");
-            screenshot(context, "donut-02-clickgui-storage-settings");
-            GuiTestInput.rightClick(context, "module1");
-
-            // Favorites and search still operate on compact cards without changing module activation.
-            GuiTestInput.click(context, "favorite0");
-            GuiTestInput.clickWithFade(context, "tab1", "contentProgress");
-            context.runOnClient(client -> require(config.storage.favorite, "The card star did not update favorites"));
-            require(GuiTestInput.visible(context, "module0") && !GuiTestInput.visible(context, "module1"),
-                    "Favorites must display only starred modules");
-            GuiTestInput.click(context, "tab0");
+            GuiTestInput.assertGlassReady(context);
+            GuiTestInput.assertModuleRows(context, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+            require(!GuiTestInput.visible(context, "module0") && !GuiTestInput.visible(context, "module1"),
+                    "Removed module tiles remain in the workspace");
+            GuiTestInput.assertSelectionAnimation(context, 5);
+            require(!config.fullbright.enabled && saves.get() == 0, "Selecting a module changed its state");
+            assertDonutAnimation(context, config);
+            GuiTestInput.click(context, "enable5");
+            require(config.fullbright.enabled, "Fullbright switch did not update its setting");
+            GuiTestInput.click(context, "favorite5");
+            GuiTestInput.click(context, "tab1");
+            require(config.fullbright.favorite && GuiTestInput.visible(context, "module5")
+                    && !GuiTestInput.visible(context, "module2"), "Favorites did not filter remaining modules");
+            GuiTestInput.click(context, "tab5");
             GuiTestInput.click(context, "search");
             GuiTestInput.type(context, "camera");
-            require(GuiTestInput.visible(context, "module2") && !GuiTestInput.visible(context, "module0")
-                            && !GuiTestInput.visible(context, "module1"),
-                    "Search must filter modules by their descriptive keywords");
-            GuiTestInput.click(context, "tab0"); // Return to the complete module list and clear search.
-
-            // Small GUI scaling must preserve clipping and reach settings below the viewport.
-            context.runOnClient(client -> {
-                client.options.guiScale().set(2);
-                client.resizeDisplay();
-            });
-            GuiTestInput.settle(context);
-            // Tab changes may preserve open cards; only open this one if it is collapsed.
-            if (!GuiTestInput.visible(context, "m0.modeOUTLINE")) GuiTestInput.rightClick(context, "module0");
+            require(GuiTestInput.visible(context, "module2") && !GuiTestInput.visible(context, "module5"),
+                    "Search did not filter remaining modules");
+            GuiTestInput.click(context, "tab5");
             GuiTestInput.assertContentClipped(context);
-            int savesBeforeOutsideClick = saves.get();
-            GuiTestInput.clickBelowContent(context);
-            require(saves.get() == savesBeforeOutsideClick, "Clicking below the content clip changed a setting");
-            GuiTestInput.click(context, "m0.groupColors");
-            GuiTestInput.clickWithFade(context, "m0.colorBase highlight", "modalProgress");
-            require(!GuiTestInput.visible(context, "module0"), "The color editor must block underlying cards");
-            int savesBeforeColor = saves.get();
-            GuiTestInput.click(context, "swatch2");
-            context.runOnClient(client -> require(config.storage.color == 0x6DDAC5,
-                    "The compact color control did not apply its palette selection"));
-            require(saves.get() > savesBeforeColor, "Color changes must invoke the save callback");
-            GuiTestInput.click(context, "colorDone");
-            GuiTestInput.click(context, "m0.groupColors");
-            GuiTestInput.scrollTop(context);
-            GuiTestInput.click(context, "m0.groupFilters");
-            require(!GuiTestInput.visible(context, "m0.droppers"), "The long settings card did not overflow the viewport");
-            GuiTestInput.click(context, "m0.droppers");
-            context.runOnClient(client -> require(!config.storage.droppers,
-                    "A scrolled setting did not accept input at GUI scale 2"));
-            GuiTestInput.assertContentClipped(context);
-            GuiTestInput.click(context, "m0.droppers");
-            GuiTestInput.click(context, "m0.groupFilters");
-            GuiTestInput.scrollTop(context);
-            screenshot(context, "donut-02b-clickgui-expanded-scaled");
-            GuiTestInput.rightClick(context, "module0");
-            if (GuiTestInput.visible(context, "m1.modeOUTLINE")) GuiTestInput.rightClick(context, "module1");
-            require(!GuiTestInput.visible(context, "m0.modeOUTLINE"), "Scaled header did not collapse its card");
-            screenshot(context, "donut-02c-clickgui-collapsed-scaled");
-            context.runOnClient(client -> {
-                client.options.guiScale().set(1);
-                client.resizeDisplay();
-            });
-            GuiTestInput.settle(context);
+            screenshot(context, "donut-source-only-workspace");
             GuiTestInput.closeAnimated(context);
-
-            // Confirm a user filter changes the actual loaded-entity results.
-            context.runOnClient(client -> config.storage.droppers = false);
-            EnumSet<TargetKind> withoutDropper = EnumSet.copyOf(ALL_KINDS);
-            withoutDropper.remove(TargetKind.DROPPER);
-            awaitKinds(context, scanner, withoutDropper);
-            context.runOnClient(client -> {
-                config.storage.droppers = true;
-                config.storage.outlineOpacity = 0.95;
-                config.spawner.outlineOpacity = 0.95;
-                config.storage.fillOpacity = 0.28;
-                config.spawner.fillOpacity = 0.28;
-                config.storage.lineWidth = 3;
-                config.spawner.lineWidth = 3;
-            });
-            awaitKinds(context, scanner, ALL_KINDS);
-            screenshot(context, "donut-03-fixtures-highlighted");
-
-            // An opaque wall hides the right-hand fixtures, distinguishing both depth policies visually.
-            world.getServer().runCommand("fill 1 65 4 8 68 4 minecraft:stone_bricks");
-            context.waitTicks(3);
-            world.getClientWorld().waitForChunksRender(false);
-            for (RenderMode mode : RenderMode.values()) {
-                for (boolean throughWalls : new boolean[] {false, true}) {
-                    context.runOnClient(client -> {
-                        config.storage.mode = mode;
-                        config.spawner.mode = mode;
-                        config.storage.throughWalls = throughWalls;
-                        config.spawner.throughWalls = throughWalls;
-                    });
-                    context.waitTicks(2);
-                    screenshot(context, "donut-04-" + mode.name().toLowerCase(Locale.ROOT)
-                            + (throughWalls ? "-through-walls" : "-visible-only"));
-                }
-            }
-
-            context.runOnClient(client -> {
-                config.storage.enabled = false;
-                config.spawner.enabled = false;
-            });
-            context.waitFor(client -> scanner.snapshot().isEmpty());
-        } finally {
-            active.set(false);
-            context.runOnClient(client -> {
-                scanner.clear();
-                renderer.close();
-            });
+            GuiTestInput.assertGlassReleased(context);
         }
     }
 
-    private static void createFixtures(TestServerContext server) {
-        server.runCommand("gamemode creative @a");
-        server.runCommand("time set noon");
-        server.runCommand("fill -10 64 -2 10 64 16 minecraft:smooth_stone");
-        server.runCommand("setblock -6 65 0 minecraft:chest");
-        server.runCommand("setblock -4 65 0 minecraft:trapped_chest");
-        server.runCommand("setblock -2 65 0 minecraft:ender_chest");
-        server.runCommand("setblock 0 65 0 minecraft:purple_shulker_box");
-        server.runCommand("setblock 2 65 0 minecraft:dropper");
-        server.runCommand("setblock 4 65 0 minecraft:spawner");
-        server.runCommand("setblock 6 65 0 minecraft:trial_spawner");
-        server.runCommand("tp @a 0.5 65 12.5 180 12");
+
+    /** A colored facade makes the scene blur and translucent panels visible in the final preview. */
+    private static void createGlassScene(TestServerContext server) {
+        server.runCommand("fill -16 65 -5 16 80 -5 minecraft:polished_diorite");
+        server.runCommand("fill -15 66 -4 -9 79 -4 minecraft:cyan_terracotta");
+        server.runCommand("fill -7 66 -4 -1 79 -4 minecraft:white_concrete");
+        server.runCommand("fill 1 66 -4 7 79 -4 minecraft:orange_terracotta");
+        server.runCommand("fill 9 66 -4 15 79 -4 minecraft:blue_concrete");
+        server.runCommand("fill -16 72 -3 16 72 -3 minecraft:polished_diorite");
+        server.runCommand("tp @a 0.5 65 12.5 180 -6");
     }
 
-    private static void awaitKinds(ClientGameTestContext context, FinderScanner scanner, EnumSet<TargetKind> expected) {
-        context.waitFor(client -> scanner.snapshot().size() == expected.size()
-                && scanner.snapshot().stream().map(FoundBlock::kind).collect(Collectors.toSet()).equals(expected));
-        context.runOnClient(client -> {
-            require(scanner.storageCount() == expected.stream().filter(kind -> !kind.isSpawner()).count(),
-                    "Storage counter did not match loaded fixtures");
-            require(scanner.spawnerCount() == expected.stream().filter(TargetKind::isSpawner).count(),
-                    "Spawner counter did not match loaded fixtures");
-        });
+
+
+    private static Path screenshot(ClientGameTestContext context, String name) {
+        return context.takeScreenshot(TestScreenshotOptions.of(name));
     }
 
-    private static void screenshot(ClientGameTestContext context, String name) {
-        context.takeScreenshot(TestScreenshotOptions.of(name).withSize(1280, 800));
+    private static void assertDonutAnimation(ClientGameTestContext context, ClientConfig config) {
+        Path first = screenshot(context, "donut-logo-spin-a");
+        context.waitTicks(12);
+        Path second = screenshot(context, "donut-logo-spin-b");
+        require(changed(first, second, 1134, 220, 100, 100) > 100,
+                "The category-header donut did not spin");
+        require(changed(first, second, 322, 148, 28, 28) > 8,
+                "The name-logo donut did not spin");
+        context.runOnClient(client -> config.clickGuiStyle.animationSpeed = 0);
+        context.waitTicks(2);
+        Path stillA = screenshot(context, "donut-logo-reduced-motion-a");
+        context.waitTicks(12);
+        Path stillB = screenshot(context, "donut-logo-reduced-motion-b");
+        require(changedArt(stillA, stillB, 1134, 220, 100, 100) == 0
+                        && changedArt(stillA, stillB, 322, 148, 28, 28) == 0,
+                "The donut ignored reduced-motion settings");
+        context.runOnClient(client -> config.clickGuiStyle.animationSpeed = 1);
+    }
+
+    private static int changedArt(Path a, Path b, int x, int y, int w, int h) {
+        try {
+            BufferedImage first = ImageIO.read(a.toFile()), second = ImageIO.read(b.toFile());
+            int count = 0, sampled = 0;
+            for (int py = y; py < y + h; py++) for (int px = x; px < x + w; px++) {
+                int color = first.getRGB(px, py), r = color >> 16 & 255, g = color >> 8 & 255, blue = color & 255;
+                if (r > 100 && (r > g * 1.25 && blue > g * 1.1 || r > g * 1.4 && r > blue * 1.5)) {
+                    sampled++;
+                    if (color != second.getRGB(px, py)) count++;
+                }
+            }
+            require(sampled > (w > 30 ? 100 : 8), "The donut pixel check did not sample its visible surface");
+            return count;
+        } catch (IOException error) { throw new AssertionError(error); }
+    }
+
+    private static int changed(Path a, Path b, int x, int y, int w, int h) {
+        try {
+            BufferedImage first = ImageIO.read(a.toFile()), second = ImageIO.read(b.toFile());
+            int count = 0;
+            for (int py = y; py < y + h; py++) for (int px = x; px < x + w; px++) {
+                if (first.getRGB(px, py) != second.getRGB(px, py)) count++;
+            }
+            return count;
+        } catch (IOException error) { throw new AssertionError(error); }
     }
 
     private static void require(boolean condition, String message) {

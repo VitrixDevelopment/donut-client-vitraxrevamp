@@ -5,6 +5,8 @@ import dev.donut.client.autobuild.LitematicLoader;
 import dev.donut.client.autobuild.MaterialTracker;
 import dev.donut.client.autobuild.PlacementTransform;
 import dev.donut.client.autobuild.Schematic;
+import dev.donut.client.spectrebuilder.BuilderBridge;
+import dev.donut.client.spectrebuilder.BuildJobStore;
 import dev.donut.client.config.ClientConfig;
 import dev.donut.client.input.ModuleKeybinds;
 import net.minecraft.util.Util;
@@ -46,7 +48,13 @@ public final class AutoBuilderScreen extends Screen {
     private final Map<String, Double> hoverAnimations = new HashMap<>();
     private final String[] coordinates = {"0", "0", "0"};
     private List<Path> files = List.of();
+    private List<Path> plans = List.of();
+    private boolean showPlans;
     private Path folder, selectedFile;
+    private static Path loadedFile;
+    private static String loadedHash;
+    private static Schematic loadedSchematic;
+    private boolean planBusy;
     private MaterialTracker.Snapshot materials;
     private MaterialTracker.Scan materialScan;
     private Schematic materialsSchematic;
@@ -78,6 +86,7 @@ public final class AutoBuilderScreen extends Screen {
             folder = minecraft.gameDirectory.toPath().resolve("schematics").resolve("donut");
             syncCoordinates();
             refreshFiles();
+            refreshPlans();
         }
         hits.clear();
     }
@@ -100,7 +109,8 @@ public final class AutoBuilderScreen extends Screen {
             g.pose().scale(scale, scale);
             shadow(g, 0, 0, W, H, 12, 0x80000000);
             round(g, 0, 0, W, H, 12, BORDER);
-            round(g, 1, 1, W - 2, H - 2, 11, PANEL);
+            GlassPanel.drawGradient(g, 1, 1, W - 2, H - 2, 11,
+                    withOpacity(0xFF20212F), withOpacity(0xFF11151C), .94f);
             strong(g, font, "AutoBuilder", 21, 20, TEXT);
             text(g, font, "SCHEMATIC LIBRARY", 21, 39, DIM);
             button(g, "close", "Close", W - 75, 16, 56, true, false, this::onClose);
@@ -130,25 +140,27 @@ public final class AutoBuilderScreen extends Screen {
             try { Files.createDirectories(folder); Util.getPlatform().openPath(folder); }
             catch (Exception e) { message = "Cannot open folder: " + errorMessage(e); }
         });
-        button(g, "refresh", refreshing ? "..." : "Refresh", 148, 96, 73, !refreshing, false, this::refreshFiles);
-        text(g, font, files.size() + " schematic" + (files.size() == 1 ? "" : "s"), 25, 132, DIM);
+        button(g, "refresh", refreshing ? "..." : "Refresh", 148, 96, 73, !refreshing, false, ()->{refreshFiles();refreshPlans();});
+        List<Path> entries=showPlans?plans:files;
+        text(g, font, entries.size() + (showPlans?" plans":" schematics"), 25, 132, DIM);
+        button(g,"libraryMode",showPlans?"Files":"Plans",148,123,73,!loading&&!planBusy,showPlans,()->{showPlans=!showPlans;fileScroll=0;refreshPlans();});
         g.enableScissor(24, 151, 222, 423);
         try {
-            if (files.isEmpty()) {
-                text(g, font, "Add .litematic files here.", 27, 167, MUTED);
-                text(g, font, "Then choose Refresh.", 27, 184, DIM);
+            if (entries.isEmpty()) {
+                text(g, font, showPlans?"No saved plans yet.":"Add .litematic / .schem files.", 27, 167, MUTED);
+                text(g, font, showPlans?"Position a file, then Save plan.":"Then choose Refresh.", 27, 184, DIM);
             }
-            for (int i = 0; i < files.size(); i++) {
+            for (int i = 0; i < entries.size(); i++) {
                 int y = 151 + i * 31 - fileScroll;
                 if (y + 28 < 151 || y > 423) continue;
-                Path file = files.get(i);
+                Path file = entries.get(i);
                 boolean selected = file.equals(selectedFile);
                 round(g, 24, y, 198, 28, 5, blend(CARD, config.accentColor, selected ? .25 : inside(24,y,198,28) ? .10 : 0));
-                text(g, font, ellipsize(file.getFileName().toString(), 176), 33, y + 10, selected ? TEXT : MUTED);
-                hit("file" + i, 24, Math.max(151, y), 198, Math.min(423, y + 28) - Math.max(151, y), () -> load(file));
+                text(g, font, ellipsize(showPlans?"Plan "+file.getFileName().toString().substring(0,Math.min(8,file.getFileName().toString().length())):file.getFileName().toString(), 176), 33, y + 10, selected ? TEXT : MUTED);
+                hit((showPlans?"plan":"file") + i, 24, Math.max(151, y), 198, Math.min(423, y + 28) - Math.max(151, y), () -> {if(showPlans)restorePlan(file);else load(file);});
             }
         } finally { g.disableScissor(); }
-        scrollbar(g, 226, 151, 271, files.size() * 31, fileScroll);
+        scrollbar(g, 226, 151, 271, entries.size() * 31, fileScroll);
     }
 
     private void drawPreview(GuiGraphics g) {
@@ -167,7 +179,7 @@ public final class AutoBuilderScreen extends Screen {
             model.render(g, 252, 102, 564, 154);
             if (schematic == null) {
                 text(g, font, "Your 3D preview will appear here", 405, 166, MUTED);
-                text(g, font, "Supports multiple regions in .litematic files", 373, 185, DIM);
+                text(g, font, "Litematica + Sponge v2/v3 / full block states", 373, 185, DIM);
             }
         } finally { g.disableScissor(); }
         hit("model", 246, 95, 576, 171, () -> draggingPreview = true);
@@ -177,12 +189,16 @@ public final class AutoBuilderScreen extends Screen {
                     + number(schematic.blocks().size()) + " blocks  /  " + schematic.regionCount() + " regions", 253, 276, MUTED);
             text(g, font, model.sampled() ? "Drag to rotate / Scroll to zoom / Surface sampled" : "Drag to rotate / Scroll to zoom", 253, 294, DIM);
             button(g, "resetView", "Reset view", 728, 273, 89, true, false, model::reset);
+            if(!schematic.warnings().isEmpty())button(g,"warnings",schematic.warnings().size()+" file notices",600,273,119,true,false,
+                    ()->openDetails(String.join("\n",schematic.warnings())));
         }
     }
 
     private void drawPositioning(GuiGraphics g) {
         boolean available = builder.schematic() != null && !loading;
         text(g, font, "WORLD POSITION", 251, 322, DIM);
+        button(g,"place","Place in world",668,305,149,available && minecraft.level!=null,false,
+                () -> {if(commitCoordinates())dev.donut.client.spectrebuilder.BuilderPlacement.begin(minecraft);});
         for (int axis = 0; axis < 3; axis++) {
             final int index = axis;
             int x = 251 + axis * 191;
@@ -218,9 +234,11 @@ public final class AutoBuilderScreen extends Screen {
         button(g, "opacityDown", "-", 347, 406, 24, true, false, () -> setOpacity(-.05));
         text(g, font, Math.round(config.autoBuilder.previewOpacity * 100) + "%", 380, 415, MUTED);
         button(g, "opacityUp", "+", 421, 406, 24, true, false, () -> setOpacity(.05));
-        if (builder.schematic() != null && !builder.schematic().warnings().isEmpty())
-            button(g, "warnings", builder.schematic().warnings().size() + " file notices", 668, 406, 149, true, false,
-                    () -> openDetails(String.join("\n", builder.schematic().warnings())));
+        button(g, "executor", config.autoBuilder.spectreCreative ? "Spectre Creative" : "Survival / multiplayer", 473, 406, 187,
+                !builder.isRunning() && builder.status()!=AutoBuilderController.Status.PAUSED, false,
+                () -> { config.autoBuilder.spectreCreative=!config.autoBuilder.spectreCreative; save.run(); });
+        button(g, "savePlan", "Save plan", 668, 406, 72, available && minecraft.level!=null && loadedSchematic==builder.schematic() && !planBusy, false, this::savePlan);
+        button(g, "restorePlan", "Restore", 748, 406, 69, !loading && !planBusy, false, this::restorePlan);
     }
 
     private void drawActions(GuiGraphics g) {
@@ -242,14 +260,15 @@ public final class AutoBuilderScreen extends Screen {
             if (builder.isRunning()) builder.pause();
             else {
                 minecraft.setScreen(null);
-                if (builder.status() == AutoBuilderController.Status.PAUSED) builder.resume(); else builder.start();
+                if (builder.status() == AutoBuilderController.Status.PAUSED) builder.resume();
+                else if (config.autoBuilder.spectreCreative) builder.startSpectre(); else builder.start();
             }
         });
         button(g, "cancel", "Cancel", 473, 459, 89, available, false, builder::cancel);
         String reason = message.isEmpty() ? builder.reason() : message;
         text(g, font, ellipsize(reason, 238), 579, 469, message.isEmpty() ? MUTED : 0xFFFFC66B);
         if (!reason.isEmpty()) hit("reason", 575, 459, 242, 26, () -> openDetails(reason));
-        text(g, font, "Server-confirmed placement / Walk + jump navigation", 251, 493, DIM);
+        text(g, font, config.autoBuilder.spectreCreative ? "Spectre: Creative single-player / bring materials first" : "Survival + multiplayer / server-confirmed placement", 251, 493, DIM);
     }
 
     private void drawMaterials(GuiGraphics g) {
@@ -268,8 +287,9 @@ public final class AutoBuilderScreen extends Screen {
         text(g, font, ellipsize(query, 313), x + 47, y + 78, searchQuery.isEmpty() ? DIM : TEXT);
         hit("materialSearch", x + 20, y + 69, 355, 26, () -> { searchFocused = true; replaceText = false; });
         boolean creative = minecraft.player != null && minecraft.player.getAbilities().instabuild;
+        button(g, "packing", "Shulker packing", x + 397, y + 69, 201, true, false,
+                () -> { materialsOpen=false; openDetails(BuilderBridge.packingSummary(builder.schematic())); });
         button(g, "getMaterials", "Get Materials", x + w - 163, y + 69, 143, creative, false, () -> { builder.getMaterials(minecraft); invalidateMaterials(); refreshMaterials(); });
-        if (!creative) text(g, font, "Creative only", x + w - 264, y + 78, DIM);
         int[] cols = {334, 397, 468, 531, 594, 663, 737};
         String[] labels = {"Total", "Correct", "Remain", "Hotbar", "Inv.", "Missing", "Unknown"};
         text(g, font, "Material", x + 20, y + 116, DIM);
@@ -320,37 +340,108 @@ public final class AutoBuilderScreen extends Screen {
             try {
                 Files.createDirectories(directory);
                 try (var stream = Files.list(directory)) {
-                    return stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".litematic"))
+                    return stream.filter(path -> Files.isRegularFile(path) && (path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".litematic") || path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".schem")))
                             .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT))).toList();
                 }
             } catch (IOException e) { throw new java.util.concurrent.CompletionException(e); }
         }).whenComplete((result, error) -> minecraft.execute(() -> {
             refreshing = false;
             if (error != null) message = "Cannot read schematic folder: " + errorMessage(error);
-            else { files = result; fileScroll = 0; message = files.isEmpty() ? "Add .litematic files using Open Folder." : ""; }
+            else { files = result; fileScroll = 0; message = files.isEmpty() ? "Add .litematic or .schem files using Open Folder." : ""; }
         }));
     }
 
     private void load(Path file) {
-        if (loading) return;
+        if (loading || planBusy) return;
         int request = ++requestId;
         selectedFile = file;
         loading = true;
         message = "";
         if (builder.isRunning()) builder.pause();
         CompletableFuture.supplyAsync(() -> {
-            try { return LitematicLoader.load(file); }
+            try {
+                String hash=BuildJobStore.hash(file);
+                Schematic schematic=BuilderBridge.load(file);
+                if(!hash.equals(BuildJobStore.hash(file)))throw new IOException("File changed while loading");
+                return new Loaded(schematic,file,hash);
+            }
             catch (IOException e) { throw new java.util.concurrent.CompletionException(e); }
         }).whenComplete((value, error) -> minecraft.execute(() -> {
             if (request != requestId) return;
             loading = false;
             if (error != null) { message = "Invalid schematic: " + errorMessage(error); return; }
-            builder.setSchematic(value);
+            builder.setSchematic(value.schematic());
+            loadedFile=value.file(); loadedHash=value.hash(); loadedSchematic=value.schematic();
             if (minecraft.player != null) builder.setTransform(new PlacementTransform(minecraft.player.blockPosition(), 0, false));
             syncCoordinates();
             invalidateMaterials();
-            model.setSchematic(value);
-            message = value.warnings().isEmpty() ? "" : "Loaded with " + value.warnings().size() + " notice(s).";
+            model.setSchematic(value.schematic());
+            message = value.schematic().warnings().isEmpty() ? "" : "Loaded with " + value.schematic().warnings().size() + " notice(s).";
+        }));
+    }
+
+    private record Loaded(Schematic schematic,Path file,String hash) { }
+    private Path jobsFolder(){return minecraft.gameDirectory.toPath().resolve("config/donut/builder/jobs");}
+    private void refreshPlans(){
+        Path directory=jobsFolder();
+        CompletableFuture.supplyAsync(()->{
+            if(!Files.isDirectory(directory))return List.<Path>of();
+            try(var stream=Files.list(directory)){return stream.filter(Files::isRegularFile).filter(p->p.getFileName().toString().endsWith(".json")).sorted().toList();}
+            catch(IOException e){throw new java.util.concurrent.CompletionException(e);}
+        }).whenComplete((result,error)->minecraft.execute(()->{if(error==null)plans=result;else message="Cannot read saved plans: "+errorMessage(error);}));
+    }
+    private String worldIdentity(){
+        String server=minecraft.getCurrentServer()!=null?minecraft.getCurrentServer().ip:minecraft.getSingleplayerServer()!=null?
+                "singleplayer:"+minecraft.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize():"not-connected";
+        return server+" / "+(minecraft.level==null?"not-in-world":minecraft.level.dimension().identifier());
+    }
+    private void savePlan() {
+        if(!commitCoordinates()||loadedFile==null||loadedSchematic!=builder.schematic())return;
+        var schematic=builder.schematic();var transform=builder.transform();
+        var materials=BuilderBridge.materials(schematic);Path file=loadedFile,directory=jobsFolder();String hash=loadedHash;
+        String world=worldIdentity();
+        planBusy=true;
+        CompletableFuture.runAsync(()->{
+            try {
+                var job=BuildJobStore.create(file,world,new dev.donut.client.spectrebuilder.Schematic.Pos(transform.origin().getX(),transform.origin().getY(),transform.origin().getZ()),transform.quarterTurns(),materials);
+                if(!job.sha256().equals(hash))throw new IOException("Schematic changed since loading. Reload it before saving.");
+                BuildJobStore.save(directory,new BuildJobStore.Job(job.schema(),job.id(),job.schematicFile(),job.sha256(),job.world(),job.origin(),job.rotation(),job.materials(),job.state(),transform.mirrorX()));
+            } catch(IOException e){throw new java.util.concurrent.CompletionException(e);}
+        }).whenComplete((unused,error)->minecraft.execute(()->{planBusy=false;message=error==null?"Plan saved. Restoring never starts construction.":"Cannot save plan: "+errorMessage(error);if(error==null)refreshPlans();}));
+    }
+    private record Restored(BuildJobStore.Job job,Loaded loaded) { }
+    private void restorePlan() {
+        restorePlan(null);
+    }
+    private void restorePlan(Path selectedJob) {
+        if(planBusy||loading)return;
+        planBusy=true;loading=true;Path directory=jobsFolder(),schematics=folder;int request=++requestId;String identity=worldIdentity();
+        if(builder.isRunning())builder.pause();
+        CompletableFuture.supplyAsync(()->{
+            try {
+                if(!Files.isDirectory(directory))throw new IOException("No saved build plans yet");
+                Path latest=selectedJob;
+                if(latest==null)try(var savedPlans=Files.list(directory)){
+                    latest=savedPlans.filter(p->p.getFileName().toString().endsWith(".json"))
+                            .max(Comparator.comparingLong(p->{try{return Files.getLastModifiedTime(p).toMillis();}catch(IOException e){return 0L;}}))
+                            .orElseThrow(()->new IOException("No saved build plans yet"));
+                }
+                var job=BuildJobStore.load(latest,schematics);
+                if(!identity.equals(job.world()))throw new IOException("This plan belongs to another server, world or dimension");
+                Path file=schematics.resolve(job.schematicFile());
+                var schematic=BuilderBridge.load(file);
+                if(!job.sha256().equals(BuildJobStore.hash(file)))throw new IOException("Schematic changed while restoring");
+                return new Restored(job,new Loaded(schematic,file,job.sha256()));
+            } catch(IOException e){throw new java.util.concurrent.CompletionException(e);}
+        }).whenComplete((restored,error)->minecraft.execute(()->{
+            planBusy=false;loading=false;if(request!=requestId)return;
+            if(error!=null){message="Cannot restore plan: "+errorMessage(error);return;}
+            if(!identity.equals(worldIdentity())){message="World changed while restoring. Restore the plan again in its saved world.";return;}
+            var loaded=restored.loaded();var job=restored.job();
+            builder.setSchematic(loaded.schematic());builder.setTransform(new PlacementTransform(new BlockPos(job.origin().x(),job.origin().y(),job.origin().z()),job.rotation(),job.mirrorX()));
+            builder.setPreviewVisible(minecraft.level!=null);loadedFile=selectedFile=loaded.file();loadedHash=loaded.hash();loadedSchematic=loaded.schematic();
+            syncCoordinates();model.setSchematic(loaded.schematic());
+            message="Plan restored. Check the preview, then Start.";
         }));
     }
 
@@ -483,7 +574,7 @@ public final class AutoBuilderScreen extends Screen {
         if (materialsOpen) materialScroll = Math.clamp(materialScroll - (int) (vertical * 28), 0, Math.max(0, filteredRows().size() * 28 - 192));
         else if (!details.isEmpty()) materialScroll = Math.clamp(materialScroll - (int) (vertical * 25), 0, Math.max(0, wrap(details, 525).size() * 17 - 181));
         else if (lx >= 246 && lx < 822 && ly >= 95 && ly < 266) model.zoom(vertical);
-        else if (lx >= 14 && lx < 234 && ly >= 151 && ly <= 423) fileScroll = Math.clamp(fileScroll - (int) (vertical * 31), 0, Math.max(0, files.size() * 31 - 272));
+        else if (lx >= 14 && lx < 234 && ly >= 151 && ly <= 423) fileScroll = Math.clamp(fileScroll - (int) (vertical * 31), 0, Math.max(0, (showPlans?plans:files).size() * 31 - 272));
         return true;
     }
     @Override public boolean keyPressed(KeyEvent event) {

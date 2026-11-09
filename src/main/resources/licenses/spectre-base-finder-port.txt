@@ -1,0 +1,10 @@
+Spectre 26.2 Sus Chunk Finder port
+
+ChunkFinderScanner, ActivityClues, SuspectObjects, GeodeGlowScan and
+BaseFinderPanel are adapted from Spectre Client 26.2 by 4ldenz and are
+licensed GPL-3.0-only. The corresponding license is spectre-GPL-3.0.txt.
+
+The scanner and look-to-inspect card are connected to Donut Client's native
+GUI/render pipelines, existing Base Finder module, settings and shortcut.
+Original Donut authorship and MIT notices are retained. The distribution
+includes GPL components and is accompanied by its matching source artifact.

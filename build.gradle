@@ -35,6 +35,44 @@ sourceSets.test {
 
 test { useJUnitPlatform() }
 
+// A focused native runtime suite; toggling the property invalidates processed test resources.
+tasks.matching { it.name == 'processGametestResources' }.configureEach {
+    inputs.property('soundDetectorTestsOnly', providers.gradleProperty('soundDetectorTestsOnly').orElse('false'))
+    inputs.property('blockEspTestsOnly', providers.gradleProperty('blockEspTestsOnly').orElse('false'))
+    inputs.property('staffDetectorTestsOnly', providers.gradleProperty('staffDetectorTestsOnly').orElse('false'))
+    doLast {
+        if (providers.gradleProperty('staffDetectorTestsOnly').orElse('false').get() == 'true') {
+            def manifest = new File(destinationDir, 'fabric.mod.json')
+            def data = new groovy.json.JsonSlurper().parse(manifest)
+            data.entrypoints['fabric-client-gametest'] = [
+                'dev.donut.client.gametest.StaffDetectorGameTest',
+                'dev.donut.client.gametest.StaffDetectorGuiGameTest',
+                'dev.donut.client.gametest.ModuleKeybindGameTest'
+            ]
+            manifest.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(data))
+        } else if (providers.gradleProperty('blockEspTestsOnly').orElse('false').get() == 'true') {
+            def manifest = new File(destinationDir, 'fabric.mod.json')
+            def data = new groovy.json.JsonSlurper().parse(manifest)
+            data.entrypoints['fabric-client-gametest'] = [
+                'dev.donut.client.gametest.BlockEspGameTest',
+                'dev.donut.client.gametest.BlockEspGuiGameTest',
+                'dev.donut.client.gametest.ModuleKeybindGameTest'
+            ]
+            manifest.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(data))
+        } else
+        if (providers.gradleProperty('soundDetectorTestsOnly').orElse('false').get() == 'true') {
+            def manifest = new File(destinationDir, 'fabric.mod.json')
+            def data = new groovy.json.JsonSlurper().parse(manifest)
+            data.entrypoints['fabric-client-gametest'] = [
+                'dev.donut.client.gametest.SoundDetectorGameTest',
+                'dev.donut.client.gametest.SoundDetectorGuiGameTest',
+                'dev.donut.client.gametest.ModuleKeybindGameTest'
+            ]
+            manifest.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(data))
+        }
+    }
+}
+
 fabricApi {
     configureTests {
         createSourceSet = true

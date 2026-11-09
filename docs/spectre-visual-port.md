@@ -1,0 +1,19 @@
+# Spectre workspace visual port
+
+The click GUI workspace presentation is adapted from the supplied Spectre 26.2 source, principally `ClickGuiRenderer`, `SpectreWidgets`, `SpectreTheme`, and the related workspace mascot renderers. Spectre's package metadata credits **4ldenz** and identifies its license as **GPL-3.0-only**. The supplied GPL text is bundled at `src/main/resources/licenses/spectre-GPL-3.0.txt`.
+
+The port renders the workspace through Minecraft's native GUI graphics API. Existing Donut module controllers, configuration persistence, and specialized module settings remain the backend for the available controls.
+
+At the reference's 1920 x 1080 size, the workspace uses its 1320 x 830 frame, 178-pixel category rail, 350-pixel inspector, 78-pixel module tiles and 12-pixel column gap. The warm workspace colors and lime tile accents are kept separately from the cool settings controls and teal control accent. Tile selection opens the inspector; its switch uses the existing activation callback. The library and inspector scroll independently. The available top-level pages are Modules, HUD and Appearance, corresponding to the current Donut features.
+
+The reference ghost rig and native vector adapter remain credited in the source. The category banner and name logo now display an original spinning 3D donut, with smooth per-vertex lighting, raised pink glaze and cylindrical colored sprinkles. Its animation stops at zero animation speed. Twenty-four faint particles remain outside the workspace reading area. Large UI scales enlarge the geometry with the fonts to keep controls readable.
+
+The frosted liquid-glass material extends this layout through Donut's native `GlassPanel` renderer. Frame, cards, inspectors, controls and popups share a half-resolution, two-pass scene blur, with restrained edge refraction, highlights and static frost grain. The current material uses a darker charcoal/navy vertical gradient, subdued upper-left light and limited tint brightness so saturated saved colors remain dark. Text and icons remain sharp. Existing color and opacity controls tint the glass; Appearance can switch back to solid surfaces. The shared scene textures resize with the window and are released when no glass surface is visible. The discoveries HUD also uses this renderer, with separate gradient colors and opacity.
+
+The active-module array list also adapts `HudRenderer.drawModuleList`, `drawRows` and `ModuleListRows`: Geist Semibold 17-pixel type, 18-pixel rows, 6-pixel padding, a 60%-opaque `#16181D` surface, joined rounded steps, shadows, widest-first sorting and exponential row transitions. Geometry is rendered in physical pixels so Minecraft's GUI-scale setting does not change the HUD's size. Donut's existing active-module state supplies the names.
+
+The adapted visual source is identified as **GPL-3.0-only**. The combined distribution therefore includes GPL components; it is not described as solely MIT. The original Donut authors and MIT notice in the repository's `LICENSE` are preserved. The package's author field continues to identify Donut Client, while this document records the Spectre contribution separately.
+
+Workspace typography uses the original, unmodified **Geist Medium** and **Geist Semibold** font files supplied with the reference. Embedded font metadata credits Copyright 2024 The Geist Project Authors, identifies version 1.800, and states the **SIL Open Font License 1.1**. The font license and attribution supplied with Spectre are bundled at `src/main/resources/licenses/geist-OFL-1.1.txt`. The four workspace font definitions select body 16, category 17, title 24, and small 13 pixel sizes, matching the reference's font roles.
+
+These credits describe the source and bundled notices for this port; the existing Donut source and separate third-party notices retain their own attribution.

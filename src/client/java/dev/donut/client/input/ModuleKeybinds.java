@@ -11,42 +11,35 @@ import java.util.Set;
 
 /** The click GUI edits the same mappings exposed in Minecraft's Controls screen. */
 public final class ModuleKeybinds {
-    public static final int MODULE_COUNT = 7;
-    private static final KeyMapping[] MODULES = new KeyMapping[MODULE_COUNT];
-    private static final boolean[] pressed = new boolean[MODULE_COUNT];
+    // Preserve the remaining module IDs used by GUI controls.
+    public static final int FIRST_MODULE = 2;
+    public static final int MODULE_COUNT = 13;
+    public static final int MODULE_LIMIT = FIRST_MODULE + MODULE_COUNT;
+    private static final KeyMapping[] MODULES = new KeyMapping[MODULE_LIMIT];
+    private static final boolean[] pressed = new boolean[MODULE_LIMIT];
     private static final Set<InputConstants.Key> heldInputs = new HashSet<>();
     private static boolean discardNextTick;
 
     private ModuleKeybinds() { }
 
-    public static void initialize(KeyMapping storage, KeyMapping spawner, KeyMapping freecam) {
-        initialize(storage, spawner, freecam, null);
-    }
-
-    public static void initialize(KeyMapping storage, KeyMapping spawner, KeyMapping freecam, KeyMapping autoBuilder) {
-        initialize(storage, spawner, freecam, autoBuilder, null);
-    }
-
-    public static void initialize(KeyMapping storage, KeyMapping spawner, KeyMapping freecam,
-                                  KeyMapping autoBuilder, KeyMapping chunkFinder) {
-        initialize(storage, spawner, freecam, autoBuilder, chunkFinder, null);
-    }
-
-    public static void initialize(KeyMapping storage, KeyMapping spawner, KeyMapping freecam,
-                                  KeyMapping autoBuilder, KeyMapping chunkFinder, KeyMapping fullbright) {
-        initialize(storage, spawner, freecam, autoBuilder, chunkFinder, fullbright, null);
-    }
-
-    public static void initialize(KeyMapping storage, KeyMapping spawner, KeyMapping freecam,
-                                  KeyMapping autoBuilder, KeyMapping chunkFinder, KeyMapping fullbright,
-                                  KeyMapping fly) {
-        MODULES[0] = storage;
-        MODULES[1] = spawner;
+    public static void initialize(KeyMapping freecam, KeyMapping autoBuilder, KeyMapping chunkFinder,
+                                  KeyMapping fullbright, KeyMapping fly, KeyMapping progressBar,
+                                  KeyMapping nameHider, KeyMapping hotbar, KeyMapping amethyst, KeyMapping lightDebug,
+                                  KeyMapping soundDetector, KeyMapping blockEsp, KeyMapping staffDetector) {
+        Arrays.fill(MODULES, null);
         MODULES[2] = freecam;
         MODULES[3] = autoBuilder;
         MODULES[4] = chunkFinder;
         MODULES[5] = fullbright;
         MODULES[6] = fly;
+        MODULES[7] = progressBar;
+        MODULES[8] = nameHider;
+        MODULES[9] = hotbar;
+        MODULES[10] = amethyst;
+        MODULES[11] = lightDebug;
+        MODULES[12] = soundDetector;
+        MODULES[13] = blockEsp;
+        MODULES[14] = staffDetector;
         Arrays.fill(pressed, false);
         heldInputs.clear();
         discardNextTick = false;

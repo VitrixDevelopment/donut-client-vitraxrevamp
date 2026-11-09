@@ -5,6 +5,7 @@ import dev.donut.client.config.ClientConfig;
 import dev.donut.client.config.ConfigStore;
 import dev.donut.client.freecam.FreecamController;
 import dev.donut.client.gui.DonutScreen;
+import dev.donut.client.gui.ModuleArrayList;
 import dev.donut.client.input.ModuleKeybinds;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,7 +28,7 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
         ClientConfig originalConfig = store.load();
         FreecamController freecam = FreecamController.getInstance();
         String[] originalKeys = context.computeOnClient(client -> new String[] {
-                ModuleKeybinds.mapping(0).saveString(), ModuleKeybinds.mapping(1).saveString(),
+                ModuleKeybinds.mapping(5).saveString(), ModuleKeybinds.mapping(8).saveString(),
                 ModuleKeybinds.mapping(2).saveString()});
         int originalGuiScale = context.computeOnClient(client -> client.options.guiScale().get());
         boolean originalHideGui = context.computeOnClient(client -> client.options.hideGui);
@@ -63,18 +64,18 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     if (!originalConfig.showHud) setHud(context, store, true);
 
                     for (int module = 0; module < TEST_KEYS.length; module++) {
-                        GuiTestInput.click(context, "keybind" + module);
+                        GuiTestInput.click(context, "keybind" + moduleId(module));
                         context.getInput().pressKey(TEST_KEYS[module]);
                         assertKey(context, module, TEST_KEYS[module]);
                     }
-                    require(store.load().storage.enabled == originalConfig.storage.enabled
-                                    && store.load().spawner.enabled == originalConfig.spawner.enabled,
-                            "Assigning keys in the GUI must not toggle finder modules");
+                    require(store.load().fullbright.enabled == originalConfig.fullbright.enabled
+                                    && store.load().nameHider.enabled == originalConfig.nameHider.enabled,
+                            "Assigning keys in the GUI must not toggle modules");
                     context.runOnClient(client -> require(!freecam.isActive(), "Assigning the Freecam key must not activate it"));
                     screenshot(context, "donut-keybind-01-assigned-normal");
 
                     // Escape cancels capture without closing the GUI or changing the existing binding.
-                    GuiTestInput.click(context, "keybind0");
+                    GuiTestInput.click(context, "keybind5");
                     screenshot(context, "donut-keybind-02-listening");
                     context.getInput().holdKey(GLFW.GLFW_KEY_ESCAPE);
                     context.runOnClient(client -> client.screen.keyPressed(new KeyEvent(GLFW.GLFW_KEY_ESCAPE, 0, 0)));
@@ -84,17 +85,17 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     assertKey(context, 0, TEST_KEYS[0]);
 
                     // Both documented clear shortcuts work, and keyboard capture can start again afterwards.
-                    GuiTestInput.click(context, "keybind1");
+                    GuiTestInput.click(context, "keybind8");
                     context.getInput().pressKey(GLFW.GLFW_KEY_DELETE);
-                    context.runOnClient(client -> require(ModuleKeybinds.mapping(1).isUnbound(),
+                    context.runOnClient(client -> require(ModuleKeybinds.mapping(8).isUnbound(),
                             "Delete did not clear the selected module binding"));
-                    GuiTestInput.click(context, "keybind1");
+                    GuiTestInput.click(context, "keybind8");
                     context.getInput().pressKey(TEST_KEYS[1]);
-                    GuiTestInput.click(context, "keybind0");
+                    GuiTestInput.click(context, "keybind5");
                     context.getInput().pressKey(GLFW.GLFW_KEY_BACKSPACE);
-                    context.runOnClient(client -> require(ModuleKeybinds.mapping(0).isUnbound(),
+                    context.runOnClient(client -> require(ModuleKeybinds.mapping(5).isUnbound(),
                             "Backspace did not clear the selected module binding"));
-                    GuiTestInput.click(context, "keybind0");
+                    GuiTestInput.click(context, "keybind5");
                     context.getInput().pressKey(TEST_KEYS[0]);
 
                     // A mouse binding goes through the same capture flow, then returns to a keyboard key.
@@ -115,7 +116,7 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                             throw new AssertionError("Cannot read the saved module bindings", error);
                         }
                         for (int module = 0; module < TEST_KEYS.length; module++) {
-                            KeyMapping mapping = ModuleKeybinds.mapping(module);
+                            KeyMapping mapping = ModuleKeybinds.mapping(moduleId(module));
                             require(options.contains("key_" + mapping.getName() + ":" + mapping.saveString()),
                                     "The assigned binding was not written to options.txt: " + mapping.getName());
                             mapping.setKey(InputConstants.UNKNOWN);
@@ -131,8 +132,8 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     });
                     context.waitTicks(2);
                     screenshot(context, "donut-keybind-03-assigned-scaled");
-                    GuiTestInput.rightClick(context, "module0");
-                    GuiTestInput.click(context, "keybind0"); // Binding in the expanded card at GUI scale 2.
+                    GuiTestInput.rightClick(context, "module5");
+                    GuiTestInput.click(context, "keybind5"); // Binding in the expanded card at GUI scale 2.
                     screenshot(context, "donut-keybind-04-settings-listening-scaled");
                     context.getInput().pressKey(TEST_KEYS[0]);
                     assertKey(context, 0, TEST_KEYS[0]);
@@ -140,19 +141,19 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     context.waitForScreen(null);
 
                     // Holding a newly bound key toggles once; releasing it does not queue a second toggle.
-                    boolean storageBefore = store.load().storage.enabled;
+                    boolean brightBefore = store.load().fullbright.enabled;
                     context.getInput().holdKey(TEST_KEYS[0]);
                     context.waitTicks(6);
-                    require(store.load().storage.enabled != storageBefore, "The storage binding did not toggle its module");
+                    require(store.load().fullbright.enabled != brightBefore, "The Fullbright binding did not toggle its module");
                     // Simulate the click enqueued by GLFW_REPEAT while the physical key stays held.
                     context.runOnClient(client -> KeyMapping.click(InputConstants.Type.KEYSYM.getOrCreate(TEST_KEYS[0])));
                     context.waitTicks(2);
-                    require(store.load().storage.enabled != storageBefore, "A repeated key event toggled the module again");
+                    require(store.load().fullbright.enabled != brightBefore, "A repeated key event toggled the module again");
                     context.getInput().releaseKey(TEST_KEYS[0]);
                     context.waitTicks(2);
-                    require(store.load().storage.enabled != storageBefore, "A held binding toggled more than once");
+                    require(store.load().fullbright.enabled != brightBefore, "A held binding toggled more than once");
                     context.getInput().pressKey(TEST_KEYS[0]);
-                    require(store.load().storage.enabled == storageBefore, "A second press did not turn storage back");
+                    require(store.load().fullbright.enabled == brightBefore, "A second press did not turn Fullbright back");
 
                     // Closing the GUI while an unrelated movement key is held must leave shortcuts usable.
                     openGui(context, openGui);
@@ -161,30 +162,31 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     context.waitForScreen(null);
                     context.waitTicks(2);
                     context.getInput().pressKey(TEST_KEYS[0]);
-                    require(store.load().storage.enabled != storageBefore,
+                    require(store.load().fullbright.enabled != brightBefore,
                             "Holding Sprint after closing the GUI blocked a module shortcut");
                     context.getInput().releaseKey(options -> options.keySprint);
                     context.getInput().pressKey(TEST_KEYS[0]);
-                    require(store.load().storage.enabled == storageBefore,
+                    require(store.load().fullbright.enabled == brightBefore,
                             "Storage did not toggle back after releasing Sprint");
 
-                    boolean spawnerBefore = store.load().spawner.enabled;
+                    boolean namesBefore = store.load().nameHider.enabled;
                     context.getInput().pressKey(TEST_KEYS[1]);
-                    require(store.load().spawner.enabled != spawnerBefore, "The spawner binding did not toggle its module");
+                    require(store.load().nameHider.enabled != namesBefore, "The Name Hider binding did not toggle its module");
                     context.getInput().pressKey(TEST_KEYS[2]);
                     context.waitFor(client -> freecam.isActive());
 
                     // Ordinary key presses while a GUI is open must not toggle or replay after closing it.
                     openGui(context, openGui);
                     context.getInput().pressKey(TEST_KEYS[0]);
-                    require(store.load().storage.enabled == storageBefore, "A module toggled while its GUI was open");
+                    require(store.load().fullbright.enabled == brightBefore, "A module toggled while its GUI was open");
                     context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
                     context.waitForScreen(null);
                     context.waitTicks(2);
-                    require(store.load().storage.enabled == storageBefore, "A GUI key press replayed after closing it");
+                    require(store.load().fullbright.enabled == brightBefore, "A GUI key press replayed after closing it");
 
-                    setFinder(context, store, 0, true);
-                    setFinder(context, store, 1, true);
+                    setModule(context, store, 0, true);
+                    setModule(context, store, 1, true);
+                    assertHudRows(context);
                     screenshot(context, "donut-arraylist-01-active-scaled");
                     context.getInput().pressKey(GLFW.GLFW_KEY_F1);
                     context.runOnClient(client -> require(client.options.hideGui, "F1 did not hide the HUD"));
@@ -195,11 +197,12 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                         client.resizeDisplay();
                     });
                     context.waitTicks(2);
+                    assertHudRows(context);
                     screenshot(context, "donut-arraylist-03-active-normal");
                     context.getInput().pressKey(TEST_KEYS[2]);
                     context.waitFor(client -> !freecam.isActive());
-                    setFinder(context, store, 0, false);
-                    setFinder(context, store, 1, false);
+                    setModule(context, store, 0, false);
+                    setModule(context, store, 1, false);
                     screenshot(context, "donut-arraylist-04-disabled");
                 } finally {
                     context.setScreen(() -> null);
@@ -212,8 +215,8 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
                     context.getInput().releaseKey(TEST_KEYS[0]);
                     context.getInput().releaseKey(options -> options.keySprint);
                     context.waitTicks(2);
-                    setFinder(context, store, 0, originalConfig.storage.enabled);
-                    setFinder(context, store, 1, originalConfig.spawner.enabled);
+                    setModule(context, store, 0, originalConfig.fullbright.enabled);
+                    setModule(context, store, 1, originalConfig.nameHider.enabled);
                     if (!originalConfig.showHud) {
                         openGui(context, openGui);
                         setHud(context, store, false);
@@ -224,7 +227,7 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
         } finally {
             context.runOnClient(client -> {
                 for (int module = 0; module < originalKeys.length; module++) {
-                    ModuleKeybinds.mapping(module).setKey(InputConstants.getKey(originalKeys[module]));
+                    ModuleKeybinds.mapping(moduleId(module)).setKey(InputConstants.getKey(originalKeys[module]));
                 }
                 openGui.setKey(InputConstants.getKey(originalOpenKey));
                 KeyMapping.resetMapping();
@@ -242,27 +245,54 @@ public final class ModuleKeybindGameTest implements FabricClientGameTest {
         GuiTestInput.settle(context);
     }
 
-    private static void setFinder(ClientGameTestContext context, ConfigStore store, int module, boolean enabled) {
+    private static void setModule(ClientGameTestContext context, ConfigStore store, int module, boolean enabled) {
         ClientConfig saved = store.load();
-        if ((module == 0 ? saved.storage.enabled : saved.spawner.enabled) != enabled) {
+        if ((module == 0 ? saved.fullbright.enabled : saved.nameHider.enabled) != enabled) {
             context.getInput().pressKey(TEST_KEYS[module]);
         }
         ClientConfig after = store.load();
-        require((module == 0 ? after.storage.enabled : after.spawner.enabled) == enabled,
+        require((module == 0 ? after.fullbright.enabled : after.nameHider.enabled) == enabled,
                 "Module " + module + " did not reach the requested enabled state");
     }
 
     private static void setHud(ClientGameTestContext context, ConfigStore store, boolean enabled) {
-        GuiTestInput.click(context, "tab2");
+        GuiTestInput.click(context, "tab6");
         if (store.load().showHud != enabled) GuiTestInput.click(context, "hud");
         require(store.load().showHud == enabled, "The array-list appearance setting did not update");
         GuiTestInput.click(context, "tab0");
     }
 
+    private static int moduleId(int slot) { return switch (slot) { case 0 -> 5; case 1 -> 8; default -> 2; }; }
+
     private static void assertKey(ClientGameTestContext context, int module, int key) {
-        context.runOnClient(client -> require(ModuleKeybinds.mapping(module).saveString().equals(
+        context.runOnClient(client -> require(ModuleKeybinds.mapping(moduleId(module)).saveString().equals(
                         InputConstants.Type.KEYSYM.getOrCreate(key).getName()),
                 "The selected key was not assigned to module " + module));
+    }
+
+    private static void assertHudRows(ClientGameTestContext context) {
+        context.waitFor(client -> {
+            java.util.List<?> rows = (java.util.List<?>) field(ModuleArrayList.class, "rows");
+            if (rows.size() < 3) return false;
+            float last = Float.POSITIVE_INFINITY;
+            java.util.Set<String> names = new java.util.HashSet<>();
+            for (Object row : rows) {
+                if (((Number) field(row, "animation")).floatValue() != 1) return false;
+                float width = ((Number) field(row, "nameWidth")).floatValue();
+                require(width <= last, "Spectre's array list is not sorted widest first");
+                last = width;
+                names.add((String) field(row, "name"));
+            }
+            return names.containsAll(java.util.List.of("Fullbright", "Name Hider", "Freecam"));
+        });
+    }
+
+    private static Object field(Object owner, String name) {
+        try {
+            var field = (owner instanceof Class<?> type ? type : owner.getClass()).getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(owner instanceof Class<?> ? null : owner);
+        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
     }
 
     private static void screenshot(ClientGameTestContext context, String name) {

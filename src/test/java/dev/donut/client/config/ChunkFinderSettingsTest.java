@@ -57,7 +57,7 @@ class ChunkFinderSettingsTest {
         assertEquals(0, low.alpha);
         assertEquals(0x123456, low.color);
         assertEquals(16, high.simulationDistance);
-        assertEquals(5, high.sensitivity);
+        assertEquals(20, high.sensitivity);
         assertEquals(255, high.alpha);
         assertEquals(0xFFFFFF, high.color);
         assertTrue(low.enabled);
@@ -129,10 +129,10 @@ class ChunkFinderSettingsTest {
         assertNotNull(settings);
         assertFalse(settings.enabled);
         assertFalse(settings.favorite);
-        assertEquals(6, settings.simulationDistance);
-        assertEquals(3, settings.sensitivity);
+        assertEquals(5, settings.simulationDistance);
+        assertEquals(6, settings.sensitivity);
         assertTrue(settings.smartAdjustment);
-        assertEquals(80, settings.alpha);
+        assertEquals(255, settings.alpha);
         assertEquals(0xC447FF, settings.color);
         assertTrue(settings.kelp);
         assertTrue(settings.caveVines);
@@ -151,5 +151,80 @@ class ChunkFinderSettingsTest {
         assertFalse(settings.bamboo);
         assertFalse(settings.cocoa);
         assertFalse(settings.beeNest);
+    }
+
+    @Test void spectreSettingsAndCategoryColorsPersist() {
+        var config = new ClientConfig();
+        var settings = config.chunkFinder;
+        settings.method = "ANBS+ Scan";
+        settings.objectRange = 192;
+        settings.inspectPanel = false;
+        settings.kelpLength = 23;
+        settings.vineLength = 22;
+        settings.caveVineLength = 31;
+        settings.bambooLength = 19;
+        settings.matureClusters = 42;
+        settings.maturePercent = 85;
+        settings.clueThreshold = 7;
+        settings.objects.put("hoppers", false);
+        settings.objectColors.put("machines", 0x123456);
+        var store = new ConfigStore(directory.resolve("spectre.json"));
+        store.save(config);
+        var loaded = store.load().chunkFinder;
+        assertEquals("ANBS+ Scan", loaded.method);
+        assertEquals(192, loaded.objectRange);
+        assertFalse(loaded.inspectPanel);
+        assertEquals(23, loaded.kelpLength);
+        assertEquals(22, loaded.vineLength);
+        assertEquals(31, loaded.caveVineLength);
+        assertEquals(19, loaded.bambooLength);
+        assertEquals(42, loaded.matureClusters);
+        assertEquals(85, loaded.maturePercent);
+        assertEquals(7, loaded.clueThreshold);
+        assertFalse(loaded.categoryEnabled(dev.donut.client.chunkfinder.SuspectObjects.Category.HOPPERS));
+        assertEquals(0xFF123456, loaded.categoryColor(dev.donut.client.chunkfinder.SuspectObjects.Category.MACHINES));
+    }
+
+    @Test void olderSettingsKeepTheirActivationFiltersAndGainObjectDefaults() throws IOException {
+        Path path = directory.resolve("legacy.json");
+        Files.writeString(path, "{\"chunkFinder\":{\"enabled\":true,\"favorite\":true,\"sensitivity\":4,\"alpha\":80,\"kelp\":false,\"objects\":null,\"objectColors\":null}}");
+        var loaded = new ConfigStore(path).load().chunkFinder;
+        assertTrue(loaded.enabled);
+        assertTrue(loaded.favorite);
+        assertEquals(4, loaded.sensitivity);
+        assertEquals(80, loaded.alpha);
+        assertFalse(loaded.kelp);
+        assertEquals("Classic", loaded.method);
+        for (var category : dev.donut.client.chunkfinder.SuspectObjects.Category.values()) {
+            assertTrue(loaded.categoryEnabled(category));
+            assertEquals(category.color, loaded.categoryColor(category));
+        }
+    }
+
+    @Test void invalidSpectreSettingsRecoverWithoutLosingCategoryChoices() {
+        var settings = new ChunkFinderSettings();
+        settings.method = null;
+        settings.objectRange = -1;
+        settings.clueThreshold = 100;
+        settings.kelpLength = 999;
+        settings.vineLength = -1;
+        settings.caveVineLength = 999;
+        settings.bambooLength = 999;
+        settings.matureClusters = 999;
+        settings.maturePercent = -1;
+        settings.objects.put("hoppers", false);
+        settings.objectColors.put("machines", 0xAA123456);
+        settings.sanitize();
+        assertEquals("Classic", settings.method);
+        assertEquals(16, settings.objectRange);
+        assertEquals(8, settings.clueThreshold);
+        assertEquals(64, settings.kelpLength);
+        assertEquals(2, settings.vineLength);
+        assertEquals(64, settings.caveVineLength);
+        assertEquals(32, settings.bambooLength);
+        assertEquals(128, settings.matureClusters);
+        assertEquals(10, settings.maturePercent);
+        assertFalse(settings.categoryEnabled(dev.donut.client.chunkfinder.SuspectObjects.Category.HOPPERS));
+        assertEquals(0xFF123456, settings.categoryColor(dev.donut.client.chunkfinder.SuspectObjects.Category.MACHINES));
     }
 }

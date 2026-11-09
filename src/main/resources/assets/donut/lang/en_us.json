@@ -1,11 +1,20 @@
 {
   "key.category.donut.client": "Donut Client",
   "key.donut.open_gui": "Open Donut GUI",
-  "key.donut.toggle_storage": "Toggle StorageFinder",
-  "key.donut.toggle_spawner": "Toggle SpawnerFinder",
   "key.donut.toggle_freecam": "Toggle Freecam",
   "key.donut.open_autobuilder": "Open AutoBuilder",
   "key.donut.toggle_chunk_finder": "Toggle Base Finder",
   "key.donut.toggle_fullbright": "Toggle Fullbright",
-  "key.donut.toggle_fly": "Toggle Fly"
+  "key.donut.toggle_fly": "Toggle Fly",
+  "key.donut.toggle_progress_bar": "Toggle Progress Bar",
+  "key.donut.toggle_name_hider": "Toggle Name Hider",
+  "key.donut.toggle_hotbar": "Toggle Hotbar",
+  "key.donut.toggle_light_debug": "Toggle Light Debug",
+  "key.donut.toggle_amethyst": "Toggle Amethyst Scanner",
+  "key.donut.toggle_sound_detector": "Toggle Sound Detector",
+  "key.donut.toggle_block_esp": "Toggle BlockESP",
+  "key.donut.toggle_staff_detector": "Toggle Staff Detector",
+  "key.donut.acknowledge_sound": "Acknowledge sound alert",
+  "key.donut.mute_sound": "Mute sound alerts for 60 seconds",
+  "key.donut.sound_history": "Open sound activity history"
 }

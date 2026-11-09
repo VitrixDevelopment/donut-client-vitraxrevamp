@@ -79,12 +79,12 @@ public final class FlyGameTest implements FabricClientGameTest {
                     screenConfig[0] = context.computeOnClient(client -> screenConfig((DonutScreen) client.screen));
                     require(!GuiTestInput.visible(context, "module6"), "Fly appeared in the Visual category");
                     if (!store.load().showHud) {
-                        GuiTestInput.clickWithFade(context, "tab2", "contentProgress");
+                        GuiTestInput.clickWithFade(context, "tab6", "contentProgress");
                         GuiTestInput.click(context, "hud");
                     }
                     GuiTestInput.clickWithFade(context, "tab3", "contentProgress");
                     require(GuiTestInput.visible(context, "module6"), "Fly is missing from Blatant");
-                    GuiTestInput.assertExpansionReverses(context, MODULE);
+                    GuiTestInput.assertSelectionAnimation(context, MODULE);
                     GuiTestInput.rightClick(context, "module6");
                     context.runOnClient(client -> require(!FlyController.enabled() && !controller.isActive(),
                             "Opening Fly settings activated flight"));
@@ -316,6 +316,7 @@ public final class FlyGameTest implements FabricClientGameTest {
         context.getInput().pressKey(openGui);
         context.waitForScreen(DonutScreen.class);
         GuiTestInput.settle(context);
+        GuiTestInput.click(context, "tab0");
     }
 
     private static ClientConfig screenConfig(DonutScreen screen) {

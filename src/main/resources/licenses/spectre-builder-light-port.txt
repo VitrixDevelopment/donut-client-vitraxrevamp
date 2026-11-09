@@ -1,0 +1,15 @@
+Spectre 26.2 AutoBuild and Light Debug port
+
+The schematic model/reader, BuilderMaterials, MaterialPlan, SupplyDepotPlan,
+BuildJobStore, CreativeBuilder and GroundNavigator are adapted from the
+supplied Spectre Client 26.2 source by 4ldenz, licensed GPL-3.0-only.
+Native BuilderBridge and BuilderPlacement integrate those tools with Donut.
+
+LightDebugScanner adapts LightEspModule, including its denoise algorithm and
+light-level colors. LightSnapshot and SessionWorker derive from Spectre.
+Only Light Debug is included in this port; Player Bypass and Prime Chunk
+Finder are not part of it. Rendering, preferences and input use Donut's APIs.
+
+The corresponding license is spectre-GPL-3.0.txt. Original Donut authorship
+and MIT notices are retained. The combined distribution includes GPL
+components and is accompanied by its matching source artifact.

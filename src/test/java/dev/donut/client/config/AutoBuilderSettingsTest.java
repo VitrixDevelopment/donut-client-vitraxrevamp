@@ -17,13 +17,15 @@ class AutoBuilderSettingsTest {
         ClientConfig config = new ClientConfig();
         config.autoBuilder.favorite = true;
         config.autoBuilder.previewOpacity = .53;
+        config.autoBuilder.spectreCreative = false;
         ConfigStore store = new ConfigStore(path);
         store.save(config);
         ClientConfig loaded = store.load();
         assertTrue(loaded.autoBuilder.favorite);
         assertEquals(.53, loaded.autoBuilder.previewOpacity);
         var saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject().getAsJsonObject("autoBuilder");
-        assertEquals(2, saved.size(), "Only presentation preferences may persist");
+        assertEquals(3, saved.size(), "Only preferences may persist in client settings; saved plans are separate");
+        assertFalse(loaded.autoBuilder.spectreCreative);
         assertFalse(saved.has("enabled"));
         assertFalse(saved.has("origin"));
     }
@@ -36,6 +38,7 @@ class AutoBuilderSettingsTest {
             assertNotNull(settings);
             assertFalse(settings.favorite);
             assertEquals(.28, settings.previewOpacity);
+            assertTrue(settings.spectreCreative);
         }
     }
 
