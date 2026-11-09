@@ -1,7 +1,6 @@
 package dev.donut.client.config;
 
 import static org.junit.jupiter.api.Assertions.*;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,214 +11,124 @@ import org.junit.jupiter.api.io.TempDir;
 class ConfigStoreTest {
     @TempDir Path directory;
 
-    @Test
-    void missingFileLoadsDisabledModulesWithoutCreatingAFile() {
-        Path path = directory.resolve("donut.json");
-
-        ClientConfig config = new ConfigStore(path).load();
-
-        assertSafeDefaults(config);
-        assertFalse(Files.exists(path));
+    @Test void missingFileLoadsDefaultsWithoutCreatingAFile() {
+        Path file = directory.resolve("donut.json");
+        assertSafeDefaults(new ConfigStore(file).load());
+        assertFalse(Files.exists(file));
     }
 
-    @Test
-    void settingsSurviveSaveAndReloadAndAnExistingFileCanBeReplaced() throws IOException {
-        Path path = directory.resolve("nested/config/donut.json");
-        ConfigStore store = new ConfigStore(path);
+    @Test void settingsSurviveSaveAndReloadAndExistingFilesCanBeReplaced() {
+        Path file = directory.resolve("nested/donut.json");
+        ConfigStore store = new ConfigStore(file);
         store.save(new ClientConfig());
         ClientConfig config = new ClientConfig();
+        config.fullbright.enabled = true;
+        config.fullbright.favorite = true;
+        config.freecam.speed = 2.5;
+        config.freecam.boostMultiplier = 4;
         config.accentColor = 0x27ADC9;
+        config.clickGuiParticles = false;
         config.showHud = false;
-        config.storage.enabled = true;
-        config.storage.favorite = true;
-        config.storage.throughWalls = false;
-        config.storage.distanceFade = false;
-        config.storage.mode = RenderMode.OUTLINE;
-        config.storage.range = 182.5;
-        config.storage.outlineOpacity = 0.42;
-        config.storage.fillOpacity = 0.08;
-        config.storage.lineWidth = 3.25;
-        config.storage.chests = false;
-        config.storage.trappedChests = false;
-        config.storage.enderChests = false;
-        config.storage.shulkers = false;
-        config.storage.droppers = false;
-        config.storage.perTypeColors = false;
-        config.storage.color = 0x123456;
-        config.storage.chestColor = 0xABCDEF;
-        config.storage.shulkerColor = 0x654321;
-        config.storage.dropperColor = 0xFEDCBA;
-        config.spawner.enabled = true;
-        config.spawner.trialSpawners = false;
-        config.spawner.mode = RenderMode.FILL;
-        config.spawner.range = 48;
-        config.spawner.color = 0x102030;
-
         store.save(config);
-        ClientConfig loaded = new ConfigStore(path).load();
-
+        ClientConfig loaded = store.load();
+        assertTrue(loaded.fullbright.enabled);
+        assertTrue(loaded.fullbright.favorite);
+        assertEquals(2.5, loaded.freecam.speed);
+        assertEquals(4, loaded.freecam.boostMultiplier);
         assertEquals(config.accentColor, loaded.accentColor);
+        assertFalse(loaded.clickGuiParticles);
         assertFalse(loaded.showHud);
-        assertTrue(loaded.storage.enabled);
-        assertTrue(loaded.storage.favorite);
-        assertFalse(loaded.storage.throughWalls);
-        assertFalse(loaded.storage.distanceFade);
-        assertEquals(RenderMode.OUTLINE, loaded.storage.mode);
-        assertEquals(182.5, loaded.storage.range);
-        assertEquals(0.42, loaded.storage.outlineOpacity);
-        assertEquals(0.08, loaded.storage.fillOpacity);
-        assertEquals(3.25, loaded.storage.lineWidth);
-        assertFalse(loaded.storage.chests);
-        assertFalse(loaded.storage.trappedChests);
-        assertFalse(loaded.storage.enderChests);
-        assertFalse(loaded.storage.shulkers);
-        assertFalse(loaded.storage.droppers);
-        assertFalse(loaded.storage.perTypeColors);
-        assertEquals(0x123456, loaded.storage.color);
-        assertEquals(0xABCDEF, loaded.storage.chestColor);
-        assertEquals(0x654321, loaded.storage.shulkerColor);
-        assertEquals(0xFEDCBA, loaded.storage.dropperColor);
-        assertTrue(loaded.spawner.enabled);
-        assertFalse(loaded.spawner.trialSpawners);
-        assertEquals(RenderMode.FILL, loaded.spawner.mode);
-        assertEquals(48, loaded.spawner.range);
-        assertEquals(0x102030, loaded.spawner.color);
-        assertFalse(Files.exists(path.resolveSibling("donut.json.tmp")));
-        assertTrue(backups(path.getParent()).isEmpty());
+        assertFalse(Files.exists(file.resolveSibling("donut.json.tmp")));
     }
 
-    @Test
-    void malformedFileIsPreservedBeforeDefaultsAreSaved() throws IOException {
-        Path path = directory.resolve("donut.json");
-        String damaged = "{\"storage\": {\"enabled\": true, broken json";
-        Files.writeString(path, damaged);
-        ConfigStore store = new ConfigStore(path);
-
+    @Test void malformedFileIsPreservedBeforeDefaultsAreSaved() throws IOException {
+        Path file = directory.resolve("donut.json");
+        String damaged = "{broken json";
+        Files.writeString(file, damaged);
+        ConfigStore store = new ConfigStore(file);
         ClientConfig recovered = store.load();
-
         assertSafeDefaults(recovered);
-        List<Path> backups = backups(directory);
+        List<Path> backups = backups();
         assertEquals(1, backups.size());
         assertEquals(damaged, Files.readString(backups.getFirst()));
-        assertEquals(damaged, Files.readString(path));
-
+        assertEquals(damaged, Files.readString(file));
         store.save(recovered);
-
-        assertSafeDefaults(new ConfigStore(path).load());
+        assertSafeDefaults(store.load());
         assertEquals(damaged, Files.readString(backups.getFirst()));
-        assertEquals(1, backups(directory).size());
+        assertEquals(1, backups().size());
     }
 
-    @Test
-    void jsonNullIsRecoveredAndBackedUp() throws IOException {
-        Path path = directory.resolve("donut.json");
-        Files.writeString(path, "null");
-
-        assertSafeDefaults(new ConfigStore(path).load());
-
-        List<Path> backups = backups(directory);
-        assertEquals(1, backups.size());
-        assertEquals("null", Files.readString(backups.getFirst()));
+    @Test void jsonNullIsRecoveredAndBackedUp() throws IOException {
+        Path file = directory.resolve("donut.json");
+        Files.writeString(file, "null");
+        assertSafeDefaults(new ConfigStore(file).load());
+        assertEquals(1, backups().size());
+        assertEquals("null", Files.readString(backups().getFirst()));
     }
 
-    @Test
-    void missingFieldsAndFutureFieldsKeepDefaultsAndKnownSettings() throws IOException {
-        Path path = directory.resolve("donut.json");
-        Files.writeString(path, """
-                {"futureOption":{"value":true},"storage":{"range":64,"chests":false}}
+    @Test void removedModuleSettingsAreIgnoredAndDroppedWhenSaving() throws IOException {
+        Path file = directory.resolve("donut.json");
+        Files.writeString(file, """
+                {"storage":{"enabled":true},"spawner":{"enabled":true},
+                 "futureOption":true,"fullbright":{"enabled":true,"favorite":true}}
                 """);
-
-        ClientConfig loaded = new ConfigStore(path).load();
-
-        assertFalse(loaded.storage.enabled);
-        assertFalse(loaded.spawner.enabled);
-        assertFalse(loaded.storage.chests);
-        assertTrue(loaded.storage.shulkers);
-        assertEquals(64, loaded.storage.range);
-        assertEquals(0.9, loaded.storage.outlineOpacity);
-        assertEquals(RenderMode.BOTH, loaded.storage.mode);
-        assertEquals(0xFF779C, loaded.spawner.color);
-        assertTrue(backups(directory).isEmpty());
+        ConfigStore store = new ConfigStore(file);
+        ClientConfig loaded = store.load();
+        assertTrue(loaded.fullbright.enabled);
+        assertTrue(loaded.fullbright.favorite);
+        store.save(loaded);
+        String saved = Files.readString(file);
+        assertFalse(saved.contains("\"storage\""));
+        assertFalse(saved.contains("\"spawner\""));
+        assertTrue(backups().isEmpty());
     }
 
-    @Test
-    void editedJsonIsSanitizedWithoutDiscardingValidSettings() throws IOException {
-        Path path = directory.resolve("donut.json");
-        Files.writeString(path, """
-                {
-                  "accentColor": -1,
-                  "showHud": false,
-                  "storage": {
-                    "enabled": true,
-                    "mode": "REMOVED_MODE",
-                    "range": 10000,
-                    "outlineOpacity": -5,
-                    "fillOpacity": 5,
-                    "lineWidth": -2,
-                    "color": -1,
-                    "droppers": false
-                  },
-                  "spawner": null
-                }
+    @Test void editedJsonIsSanitizedWithoutDiscardingValidSettings() throws IOException {
+        Path file = directory.resolve("donut.json");
+        Files.writeString(file, """
+                {"accentColor":-1,"showHud":false,"freecam":{"speed":10000,"boostMultiplier":-2},
+                 "fullbright":{"enabled":true},"clickGuiStyle":null,"chunkFinder":null}
                 """);
-
-        ClientConfig loaded = new ConfigStore(path).load();
-
+        ClientConfig loaded = new ConfigStore(file).load();
         assertEquals(0xFFFFFF, loaded.accentColor);
         assertFalse(loaded.showHud);
-        assertTrue(loaded.storage.enabled);
-        assertFalse(loaded.storage.droppers);
-        assertEquals(RenderMode.BOTH, loaded.storage.mode);
-        assertEquals(256, loaded.storage.range);
-        assertEquals(0, loaded.storage.outlineOpacity);
-        assertEquals(1, loaded.storage.fillOpacity);
-        assertEquals(0.5, loaded.storage.lineWidth);
-        assertEquals(0xFFFFFF, loaded.storage.color);
-        assertFalse(loaded.spawner.enabled);
-        assertEquals(0xFF779C, loaded.spawner.color);
-        assertFalse(loaded.spawner.perTypeColors);
-        assertTrue(backups(directory).isEmpty());
+        assertEquals(5, loaded.freecam.speed);
+        assertEquals(1, loaded.freecam.boostMultiplier);
+        assertTrue(loaded.fullbright.enabled);
+        assertNotNull(loaded.clickGuiStyle);
+        assertNotNull(loaded.chunkFinder);
+        assertTrue(backups().isEmpty());
     }
 
-    @Test
-    void savingNonFiniteValuesProducesReadableFiniteJson() throws IOException {
-        Path path = directory.resolve("donut.json");
+    @Test void savingNonFiniteValuesProducesReadableFiniteJson() throws IOException {
+        Path file = directory.resolve("donut.json");
         ClientConfig config = new ClientConfig();
-        config.storage.range = Double.NaN;
-        config.storage.outlineOpacity = Double.POSITIVE_INFINITY;
-        config.storage.fillOpacity = Double.NEGATIVE_INFINITY;
-        config.storage.lineWidth = Double.NaN;
-        config.spawner.mode = null;
-
-        assertDoesNotThrow(() -> new ConfigStore(path).save(config));
-        ClientConfig loaded = new ConfigStore(path).load();
-
-        assertEquals(96, loaded.storage.range);
-        assertEquals(0.9, loaded.storage.outlineOpacity);
-        assertEquals(0.16, loaded.storage.fillOpacity);
-        assertEquals(1.5, loaded.storage.lineWidth);
-        assertEquals(RenderMode.BOTH, loaded.spawner.mode);
-        String json = Files.readString(path);
-        assertFalse(json.contains("NaN"));
-        assertFalse(json.contains("Infinity"));
-        assertTrue(backups(directory).isEmpty());
+        config.freecam.speed = Double.NaN;
+        config.freecam.boostMultiplier = Double.POSITIVE_INFINITY;
+        config.clickGuiStyle.scale = Double.NEGATIVE_INFINITY;
+        assertDoesNotThrow(() -> new ConfigStore(file).save(config));
+        ClientConfig loaded = new ConfigStore(file).load();
+        assertEquals(1, loaded.freecam.speed);
+        assertEquals(3, loaded.freecam.boostMultiplier);
+        assertEquals(1, loaded.clickGuiStyle.scale);
+        String saved = Files.readString(file);
+        assertFalse(saved.contains("NaN"));
+        assertFalse(saved.contains("Infinity"));
     }
 
-    private static List<Path> backups(Path parent) throws IOException {
-        try (var files = Files.list(parent)) {
-            return files.filter(path -> path.getFileName().toString().startsWith("donut.json.invalid-")).toList();
+    private List<Path> backups() throws IOException {
+        try (var files = Files.list(directory)) {
+            return files.filter(file -> file.getFileName().toString().startsWith("donut.json.invalid-")).toList();
         }
     }
 
     private static void assertSafeDefaults(ClientConfig config) {
-        assertNotNull(config.storage);
-        assertNotNull(config.spawner);
-        assertFalse(config.storage.enabled);
-        assertFalse(config.spawner.enabled);
-        assertEquals(RenderMode.BOTH, config.storage.mode);
-        assertEquals(RenderMode.BOTH, config.spawner.mode);
-        assertEquals(96, config.storage.range);
-        assertEquals(0xFF779C, config.spawner.color);
-        assertFalse(config.spawner.perTypeColors);
+        assertNotNull(config.freecam);
+        assertNotNull(config.fullbright);
+        assertNotNull(config.chunkFinder);
+        assertFalse(config.freecam.enabled);
+        assertFalse(config.fullbright.enabled);
+        assertTrue(config.clickGuiParticles);
+        assertEquals(1, config.freecam.speed);
     }
 }

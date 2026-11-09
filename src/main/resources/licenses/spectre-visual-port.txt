@@ -1,0 +1,14 @@
+Spectre 26.2 workspace visual port
+
+Workspace layout, widgets, module-array-list HUD and procedural ghost artwork are adapted from
+Spectre Client 26.2, credited by its package metadata to 4ldenz and licensed
+GPL-3.0-only. The license text accompanies this notice as spectre-GPL-3.0.txt.
+
+The presentation is adapted to Minecraft's native GUI renderer and connected
+to Donut Client's existing module controllers and settings. Original Donut
+authorship and the original MIT notice are retained. This distribution includes
+GPL components and is supplied with the corresponding source artifact.
+
+The original Geist Medium and Semibold fonts are Copyright 2024 The Geist
+Project Authors and licensed under the SIL Open Font License 1.1. See
+geist-OFL-1.1.txt. Other bundled assets retain their separate notices.

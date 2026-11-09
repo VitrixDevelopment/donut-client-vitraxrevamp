@@ -4,11 +4,34 @@
   "version": "1.0.0",
   "name": "Donut Client Runtime Tests",
   "environment": "client",
+  "mixins": ["donut.gametest.mixins.json"],
   "entrypoints": {
     "fabric-client-gametest": [
+      "dev.donut.client.gametest.StaffDetectorGameTest",
+      "dev.donut.client.gametest.StaffDetectorGuiGameTest",
+      "dev.donut.client.gametest.BlockEspGameTest",
+      "dev.donut.client.gametest.BlockEspGuiGameTest",
+      "dev.donut.client.gametest.SoundDetectorGameTest",
+      "dev.donut.client.gametest.SoundDetectorGuiGameTest",
+      "dev.donut.client.gametest.SpectreBuilderGameTest",
+      "dev.donut.client.gametest.SpectreBuilderGuiGameTest",
+      "dev.donut.client.gametest.LightDebugGameTest",
+      "dev.donut.client.gametest.AmethystGameTest",
+      "dev.donut.client.gametest.HotbarGameTest",
+      "dev.donut.client.gametest.NameHiderGameTest",
+      "dev.donut.client.gametest.ProgressBarGameTest",
+      "dev.donut.client.gametest.FlyMultiplayerGameTest",
+      "dev.donut.client.gametest.FlyGameTest",
+      "dev.donut.client.gametest.FullbrightGameTest",
+      "dev.donut.client.gametest.ChunkFinderDepthGameTest",
       "dev.donut.client.gametest.DonutClientGameTest",
       "dev.donut.client.gametest.FreecamGameTest",
-      "dev.donut.client.gametest.ModuleKeybindGameTest"
+      "dev.donut.client.gametest.ModuleKeybindGameTest",
+      "dev.donut.client.gametest.AutoBuilderDataGameTest",
+      "dev.donut.client.gametest.AutoBuilderGuiGameTest",
+      "dev.donut.client.gametest.AutoBuilderEngineGameTest",
+      "dev.donut.client.gametest.ChunkFinderGameTest",
+      "dev.donut.client.gametest.ChunkFinderGuiGameTest"
     ]
   },
   "depends": {

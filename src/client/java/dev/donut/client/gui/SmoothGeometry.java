@@ -21,6 +21,38 @@ import java.util.Arrays;
 final class SmoothGeometry {
     private SmoothGeometry() { }
 
+    /** Individual corner flags for the connected Spectre HUD rows. */
+    static void corners(GuiGraphics g, float x, float y, float w, float h, float radius, int flags, int color) {
+        if (w <= 0 || h <= 0 || (color >>> 24) == 0) return;
+        Mesh mesh = new Mesh(g);
+        float r = Math.clamp(radius, 0, Math.min(w, h) / 2);
+        int segments = segments(r, mesh.pixel);
+        float[] inner = cornerPath(x, y, w, h, r, flags, mesh.pixel / 2, segments);
+        float[] outer = cornerPath(x, y, w, h, r, flags, -mesh.pixel / 2, segments);
+        mesh.fill(inner, x + w / 2, y + h / 2, color);
+        mesh.band(inner, color, outer, color & 0xFFFFFF);
+        mesh.submit(g);
+    }
+
+    private static float[] cornerPath(float x, float y, float w, float h, float radius,
+                                       int flags, float inset, int segments) {
+        float left = x + inset, top = y + inset, right = x + w - inset, bottom = y + h - inset;
+        float[] points = new float[(segments + 1) * 8];
+        int[] bits = {32, 128, 64, 16};
+        int p = 0;
+        for (int corner = 0; corner < 4; corner++) {
+            float r = (flags & bits[corner]) == 0 ? 0 : Math.max(0, radius - inset);
+            float cx = corner < 2 ? right - r : left + r;
+            float cy = corner == 0 || corner == 3 ? top + r : bottom - r;
+            for (int i = 0; i <= segments; i++) {
+                double a = (corner - 1 + i / (double) segments) * Math.PI / 2;
+                points[p++] = cx + (float) Math.cos(a) * r;
+                points[p++] = cy + (float) Math.sin(a) * r;
+            }
+        }
+        return points;
+    }
+
     static void rounded(GuiGraphics g, float x, float y, float w, float h, float radius,
                         float stroke, int color) {
         if (w <= 0 || h <= 0 || (color >>> 24) == 0) return;

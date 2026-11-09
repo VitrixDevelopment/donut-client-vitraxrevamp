@@ -15,11 +15,12 @@ import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import dev.donut.client.config.ClientConfig;
-import dev.donut.client.config.FinderSettings;
-import dev.donut.client.config.RenderMode;
-import dev.donut.client.finder.FinderScanner;
-import dev.donut.client.finder.FoundBlock;
-import dev.donut.client.finder.TargetKind;
+import dev.donut.client.chunkfinder.ChunkFinderScanner;
+import dev.donut.client.amethyst.AmethystScanner;
+import dev.donut.client.blockesp.BlockEspController;
+import dev.donut.client.blockesp.OreMarker;
+import dev.donut.client.gui.BaseFinderPanel;
+import dev.donut.client.autobuild.MaterialTracker;
 import net.fabricmc.fabric.api.client.rendering.v1.FabricRenderState;
 import net.fabricmc.fabric.api.client.rendering.v1.RenderStateDataKey;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldExtractionContext;
@@ -62,7 +63,12 @@ public final class HighlightRenderer implements AutoCloseable {
     };
 
     private final ClientConfig config;
-    private final FinderScanner scanner;
+    private final ChunkFinderScanner chunkScanner;
+    private final AmethystScanner amethystScanner;
+    private final dev.donut.client.light.LightDebugScanner lightDebug;
+    private final BlockEspController blockEsp;
+    private final RenderStateDataKey<List<DrawLine>> tracers = RenderStateDataKey.create(() -> "Donut finder tracers");
+    private final SchematicGhosts ghosts = new SchematicGhosts();
     private final Batch fillVisible = new Batch(FILL_VISIBLE);
     private final Batch fillThrough = new Batch(FILL_THROUGH);
     private final Batch lineVisible = new Batch(LINE_VISIBLE);
@@ -70,9 +76,28 @@ public final class HighlightRenderer implements AutoCloseable {
     private boolean registered;
     private boolean closed;
 
-    public HighlightRenderer(ClientConfig config, FinderScanner scanner) {
+    public HighlightRenderer(ClientConfig config) {
+        this(config, null);
+    }
+
+    public HighlightRenderer(ClientConfig config, ChunkFinderScanner chunkScanner) {
+        this(config, chunkScanner, null);
+    }
+
+    public HighlightRenderer(ClientConfig config, ChunkFinderScanner chunkScanner, AmethystScanner amethystScanner) {
+        this(config, chunkScanner, amethystScanner, null);
+    }
+
+    public HighlightRenderer(ClientConfig config, ChunkFinderScanner chunkScanner, AmethystScanner amethystScanner, dev.donut.client.light.LightDebugScanner lightDebug) {
+        this(config, chunkScanner, amethystScanner, lightDebug, null);
+    }
+
+    public HighlightRenderer(ClientConfig config, ChunkFinderScanner chunkScanner, AmethystScanner amethystScanner, dev.donut.client.light.LightDebugScanner lightDebug, BlockEspController blockEsp) {
+        this.lightDebug = lightDebug;
+        this.blockEsp = blockEsp;
         this.config = config;
-        this.scanner = scanner;
+        this.chunkScanner = chunkScanner;
+        this.amethystScanner = amethystScanner;
     }
 
     public void register() {
@@ -106,53 +131,90 @@ public final class HighlightRenderer implements AutoCloseable {
 
     private void extract(WorldExtractionContext context) {
         FabricRenderState state = (FabricRenderState) context.worldState();
-        if (closed || (!config.storage.enabled && !config.spawner.enabled)) {
+        if (closed) {
             state.setData(frame, List.of());
+            state.setData(tracers, List.of());
             return;
         }
 
         Vec3 camera = context.worldState().cameraRenderState.pos;
+        if (chunkScanner != null && config.chunkFinder.enabled) BaseFinderPanel.captureProjection(context);
         List<DrawBox> boxes = new ArrayList<>();
-        for (FoundBlock block : scanner.snapshot()) {
-            FinderSettings settings = block.kind().isSpawner() ? config.spawner : config.storage;
-            if (!settings.enabled || !block.kind().included(settings)) continue;
-            double distance = Vec3.atCenterOf(block.pos()).distanceTo(camera);
-            if (distance > settings.range) continue;
-
-            if (!context.world().hasChunkAt(block.pos())) continue;
-            var currentState = context.world().getBlockState(block.pos());
-            if (TargetKind.from(currentState) != block.kind()) continue;
-            VoxelShape shape = currentState.getShape(context.world(), block.pos());
-            if (shape.isEmpty()) continue;
-            AABB bounds = shape.bounds().move(block.pos()).inflate(0.003);
+        List<DrawLine> lines = new ArrayList<>();
+        if (chunkScanner != null && config.chunkFinder.enabled && config.chunkFinder.alpha > 0) {
+            var settings = config.chunkFinder;
+            for (var marker : chunkScanner.snapshot()) {
+                if (marker.bounds().distanceToSqr(camera) > settings.objectRange * settings.objectRange) continue;
+                int color = (settings.alpha << 24) | (settings.categoryColor(marker.category()) & 0xFFFFFF);
+                for (var shape : marker.shapes()) {
+                    AABB bounds = shape.inflate(.008);
+                    if (!context.frustum().isVisible(bounds)) continue;
+                    boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z), 0, color, 1.8f, true));
+                }
+            }
+        }
+        if (amethystScanner != null && config.amethyst.enabled) {
+            var forward = context.camera().forwardVector();
+            Vec3 start = new Vec3(forward.x(), forward.y(), forward.z()).scale(.1);
+            for (var pos : amethystScanner.snapshot()) {
+                if (!context.world().hasChunkAt(pos)) continue;
+                AABB bounds = new AABB(pos);
+                if (context.frustum().isVisible(bounds)) boxes.add(new DrawBox(bounds.move(-camera.x,-camera.y,-camera.z),
+                        AmethystScanner.COLOR, AmethystScanner.COLOR, 1.5f, true));
+                if (config.amethyst.tracer) lines.add(new DrawLine(start, Vec3.atCenterOf(pos).subtract(camera), AmethystScanner.COLOR));
+            }
+        }
+        if (lightDebug != null && config.lightDebug.enabled) {
+            for (var entry : lightDebug.snapshot().entrySet()) {
+                int fill = dev.donut.client.light.LightDebugScanner.fillColor(config.lightDebug.color, entry.getKey());
+                int stroke = dev.donut.client.light.LightDebugScanner.strokeColor(fill);
+                for (AABB bounds : entry.getValue()) {
+                    if (!context.world().getChunkSource().hasChunk((int)bounds.minX >> 4, (int)bounds.minZ >> 4) || !context.frustum().isVisible(bounds)) continue;
+                    boxes.add(new DrawBox(bounds.move(-camera.x,-camera.y,-camera.z), fill, stroke, 1.5f, true));
+                }
+            }
+        }
+        if (blockEsp != null && config.blockEsp.enabled && config.blockEsp.opacity > 0
+                && context.world().dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) {
+            var settings = config.blockEsp;
+            for (var marker : blockEsp.snapshot()) {
+                int rgb = marker.kind() == OreMarker.Kind.EMERALD ? settings.emeraldColor : settings.coalColor;
+                int outline = settings.opacity << 24 | rgb;
+                AABB bounds = new AABB(marker.pos()).inflate(.003);
+                if (context.frustum().isVisible(bounds)) boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z),
+                        argb(rgb, settings.opacity / 255.0 * .12), outline, 1.8f, true));
+                if (settings.tracers) lines.add(new DrawLine(Vec3.ZERO, Vec3.atCenterOf(marker.pos()).subtract(camera), outline, true));
+            }
+        }
+        var soundDetector = dev.donut.client.sound.SoundDetectorController.get();
+        if (soundDetector != null) for (var incident : soundDetector.markers()) {
+            AABB bounds = new AABB(incident.x() - .3, incident.y(), incident.z() - .3,
+                    incident.x() + .3, incident.y() + .6, incident.z() + .3);
             if (!context.frustum().isVisible(bounds)) continue;
-
-            double fade = settings.distanceFade ? fade(distance, settings.range) : 1.0;
-            int color = color(settings, block.kind());
-            int fill = settings.mode != RenderMode.OUTLINE ? argb(color, settings.fillOpacity * fade) : 0;
-            int outline = settings.mode != RenderMode.FILL ? argb(color, settings.outlineOpacity * fade) : 0;
-            if ((fill >>> 24) == 0 && (outline >>> 24) == 0) continue;
-            // Subtract in double precision before making vertices, including near the world border.
-            boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z), fill, outline,
-                    (float) Math.clamp(settings.lineWidth, 0.5, 8.0), settings.throughWalls));
+            int color = incident.priority() == dev.donut.client.sound.SoundIncident.Priority.CRITICAL
+                    ? config.soundDetector.criticalColor : config.soundDetector.warningColor;
+            boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z),
+                    argb(color, .12), argb(color, .85), 1.5f, true));
+        }
+        for (SchematicGhosts.Ghost ghost : ghosts.nearby(camera)) {
+            boolean loaded = MaterialTracker.isLoaded(context.world(), ghost.pos());
+            var actual = loaded ? context.world().getBlockState(ghost.pos()) : null;
+            if (actual != null && actual.equals(ghost.state())) continue;
+            boolean conflict = actual != null && !actual.canBeReplaced() && !actual.is(ghost.state().getBlock());
+            int color = !loaded ? 0xB788FF : conflict ? 0xFF657B : ghost.state().getMapColor(context.world(), ghost.pos()).col;
+            if (color == 0) color = config.accentColor;
+            VoxelShape shape = ghost.state().getShape(context.world(), ghost.pos());
+            AABB bounds = (shape.isEmpty() ? new AABB(0, 0, 0, 1, 1, 1) : shape.bounds())
+                    .move(ghost.pos()).inflate(.002);
+            if (!context.frustum().isVisible(bounds)) continue;
+            boxes.add(new DrawBox(bounds.move(-camera.x, -camera.y, -camera.z),
+                    argb(color, config.autoBuilder.previewOpacity), argb(color, .8), 1.3f, false));
         }
         state.setData(frame, List.copyOf(boxes));
+        state.setData(tracers, List.copyOf(lines));
     }
 
-    private static int color(FinderSettings settings, TargetKind kind) {
-        if (!settings.perTypeColors) return settings.color;
-        return switch (kind) {
-            case CHEST, TRAPPED_CHEST, ENDER_CHEST -> settings.chestColor;
-            case SHULKER -> settings.shulkerColor;
-            case DROPPER -> settings.dropperColor;
-            case SPAWNER, TRIAL_SPAWNER -> settings.color;
-        };
-    }
 
-    private static double fade(double distance, double range) {
-        double progress = Math.clamp((distance / Math.max(1.0, range) - 0.5) * 2.0, 0.0, 1.0);
-        return 1.0 - progress * progress * (3.0 - 2.0 * progress);
-    }
 
     private static int argb(int rgb, double opacity) {
         return ((int) Math.round(Math.clamp(opacity, 0.0, 1.0) * 255.0) << 24) | (rgb & 0xFFFFFF);
@@ -161,7 +223,8 @@ public final class HighlightRenderer implements AutoCloseable {
     private void draw(WorldRenderContext context) {
         if (closed) return;
         List<DrawBox> boxes = ((FabricRenderState) context.worldState()).getData(frame);
-        if (boxes == null || boxes.isEmpty()) return;
+        List<DrawLine> lines = ((FabricRenderState) context.worldState()).getData(tracers);
+        if ((boxes == null || boxes.isEmpty()) && (lines == null || lines.isEmpty())) return;
         PoseStack.Pose pose = context.matrices().last();
         for (DrawBox box : boxes) {
             if ((box.fill >>> 24) != 0) {
@@ -169,6 +232,20 @@ public final class HighlightRenderer implements AutoCloseable {
             }
             if ((box.outline >>> 24) != 0) {
                 outlined((box.throughWalls ? lineThrough : lineVisible).begin(), pose, box.bounds, box.outline, box.width);
+            }
+        }
+        if (lines != null && !lines.isEmpty()) {
+            // Vertices pass through both the event pose and the uniform model-view matrix.
+            // Invert their combination so BlockESP starts at the crosshair even with view bobbing.
+            var anchor = new Matrix4f(RenderSystem.getModelViewMatrix()).mul(pose.pose()).invert()
+                    .transformPosition(new Vector3f(0, 0, -1));
+            Vec3 crosshair = new Vec3(anchor.x, anchor.y, anchor.z);
+            for (DrawLine line : lines) {
+                Vec3 from = line.crosshair ? crosshair : line.from;
+                Vec3 normal = line.to.subtract(from).normalize();
+                var buffer = lineThrough.begin();
+                for (Vec3 point : List.of(from, line.to)) buffer.addVertex(pose.pose(), (float)point.x, (float)point.y, (float)point.z)
+                        .setColor(line.color).setNormal(pose,(float)normal.x,(float)normal.y,(float)normal.z).setLineWidth(1.5f);
             }
         }
         // Drawing all fills before lines keeps translucent surfaces from dimming their own outlines.
@@ -217,6 +294,9 @@ public final class HighlightRenderer implements AutoCloseable {
     }
 
     private record DrawBox(AABB bounds, int fill, int outline, float width, boolean throughWalls) { }
+    private record DrawLine(Vec3 from, Vec3 to, int color, boolean crosshair) {
+        private DrawLine(Vec3 from, Vec3 to, int color) { this(from, to, color, false); }
+    }
 
     /** A persistent CPU allocator and rotating GPU vertex buffer for one pipeline. */
     private static final class Batch implements AutoCloseable {
