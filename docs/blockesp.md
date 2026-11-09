@@ -40,7 +40,11 @@ cases the client's faithful vanilla simulation still produces positions, but the
 random with respect to the real world. Showing them would be showing noise.
 
 BlockESP therefore cross-checks prediction against reality every tick, using the ores in received
-chunks whose prediction has completed:
+chunks whose prediction has completed. Only **exposed** received ores (a face-neighbour that does
+not fully occlude them: cave openings, fluids, partial blocks) count as evidence. That restriction
+matters: anti-xray engine modes 2/3 fabricate buried ores wholesale, so buried received blocks prove
+nothing and must never be able to refute — or verify — a seed. Vein inference is likewise only
+seeded from exposed received coal.
 
 - A correct seed misses a natural ore with probability **zero** (FULL-status generation reproduces
   every original ore, including neighbouring-chunk feature writes), so every received ore should be

@@ -93,20 +93,35 @@ public final class BlockEspGameTest implements FabricClientGameTest {
             require(!expected.isEmpty(), "Fresh comparison must include actual generated target ores");
 
             // A server-side feature-seed/seed change makes simulation unable to predict any ore.
-            // Three-plus received ores with zero prediction matches must refute the seed, suppress
-            // its random positions, and still surface every ore the server actually sent.
+            // Buried received blocks are not evidence (anti-xray modes 2/3 fabricate those), so
+            // refutation is driven by exposed ores: three placed in an open pocket above the
+            // deepslate layer, where they cannot coincide with natural target ores.
+            var fixture = Set.of(
+                    new OreMarker(new BlockPos(-25, 120, -24), OreMarker.Kind.EMERALD),
+                    new OreMarker(new BlockPos(-24, 120, -24), OreMarker.Kind.EMERALD),
+                    new OreMarker(new BlockPos(-23, 120, -24), OreMarker.Kind.EMERALD));
+            var expectedWithFixture = new HashSet<>(expected);
+            expectedWithFixture.addAll(fixture);
+            server.runCommand("fill -27 118 -26 -21 122 -22 minecraft:air");
+            server.runCommand("setblock -25 120 -24 minecraft:deepslate_emerald_ore");
+            server.runCommand("setblock -24 120 -24 minecraft:deepslate_emerald_ore");
+            server.runCommand("setblock -23 120 -24 minecraft:deepslate_emerald_ore");
+            context.waitTicks(10);
             context.runOnClient(mc -> config.blockEsp.seed = "-1");
             context.waitFor(mc -> {
                 require(!scanner.status().startsWith("Prediction failed"), scanner.status());
                 return scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.REFUTED
-                        && knownMarkers(scanner).equals(expected);
+                        && knownMarkers(scanner).equals(expectedWithFixture);
             }, 2400);
             require(context.computeOnClient(mc -> scanner.matchedOres() == 0 && scanner.observedOres() >= 3),
-                    "Refutation must rest on at least three unpredicted received ores");
-            // Restoring the true seed re-verifies simulation against the same received ores.
+                    "Refutation must rest on at least three exposed, unpredicted received ores");
+            // Removing the placed ores and restoring the true seed must un-refute it: every
+            // remaining exposed received ore (if any) is predicted again.
+            server.runCommand("fill -25 120 -24 -23 120 -24 minecraft:air");
             context.runOnClient(mc -> config.blockEsp.seed = BlockEspSettings.DEFAULT_SEED);
             context.waitFor(mc -> scanner.completedChunks() == 9
-                    && scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.VERIFIED
+                    && (scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.VERIFIED
+                            || scanner.seedTrust() == dev.donut.client.blockesp.SeedTrust.State.UNKNOWN)
                     && knownMarkers(scanner).equals(expected), 2400);
             require(context.computeOnClient(mc -> scanner.snapshot().stream().filter(OreMarker::inferred)
                     .allMatch(marker -> marker.kind() == OreMarker.Kind.COAL && expected.stream()

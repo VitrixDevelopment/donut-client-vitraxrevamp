@@ -57,6 +57,12 @@ public final class BlockEspController implements AutoCloseable {
     private List<OreMarker> liveMarkers = List.of();
     /** Received ores remembered per chunk, so anti-xray reveals survive chunk unloads. */
     private final LinkedHashMap<Long, List<OreMarker>> liveCache = new LinkedHashMap<>();
+    /**
+     * Received ores with a non-occluding neighbour in a currently loaded chunk. Anti-xray engine
+     * modes 2/3 fabricate buried ores wholesale, so only exposed received ores are trustworthy
+     * evidence about the seed or about a vein's existence.
+     */
+    private List<OreMarker> exposedLiveMarkers = List.of();
     private SeedTrust.State trust = SeedTrust.State.UNKNOWN;
     private int matchedOres, observedOres;
     private String status = "Disabled";
@@ -205,7 +211,7 @@ public final class BlockEspController implements AutoCloseable {
         if (settings.coal) {
             var knownPositions = new HashSet<net.minecraft.core.BlockPos>();
             for (var marker : found) knownPositions.add(marker.pos());
-            found.addAll(VeinInference.candidates(liveMarkers,
+            found.addAll(VeinInference.candidates(exposedLiveMarkers,
                     pos -> client.level.getChunkSource().getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.FULL, false) != null
                             && client.level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.DEEPSLATE),
                     knownPositions));
@@ -225,14 +231,18 @@ public final class BlockEspController implements AutoCloseable {
         // loaded is authoritative (an empty scan forgets ores mined since it was last seen);
         // an unloaded chunk keeps its last received contents, which is exactly how a block that
         // anti-xray revealed while mining stays marked after the player walks away.
+        var exposed = new ArrayList<OreMarker>();
         for (int dz = -radius; dz <= radius; dz++) for (int dx = -radius; dx <= radius; dx++) {
             int cx = centerX + dx, cz = centerZ + dz;
             var chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
             if (chunk == null) continue;
-            liveCache.put(ChunkPos.asLong(cx, cz), VanillaOreGenerator.findOres(chunk).stream()
-                    .map(marker -> marker.withSource(OreMarker.Source.RECEIVED)).toList());
+            var received = VanillaOreGenerator.findOres(chunk).stream()
+                    .map(marker -> marker.withSource(OreMarker.Source.RECEIVED)).toList();
+            liveCache.put(ChunkPos.asLong(cx, cz), received);
+            for (var marker : received) if (isExposed(level, marker.pos())) exposed.add(marker);
             while (liveCache.size() > MAX_CACHED_CHUNKS) liveCache.remove(liveCache.keySet().iterator().next());
         }
+        exposedLiveMarkers = List.copyOf(exposed);
         var live = new ArrayList<OreMarker>();
         for (var entry : liveCache.entrySet()) {
             ChunkPos chunk = new ChunkPos(entry.getKey());
@@ -247,7 +257,9 @@ public final class BlockEspController implements AutoCloseable {
             if (Math.abs(chunk.x - centerX) <= radius && Math.abs(chunk.z - centerZ) <= radius)
                 predicted.addAll(entry.getValue());
         }
-        for (var ore : liveMarkers) {
+        // Evidence is exposed received ores only: buried ones may be anti-xray fabrications, and
+        // counting them could refute (and suppress) a seed that is in fact still correct.
+        for (var ore : exposedLiveMarkers) {
             long chunkKey = ChunkPos.asLong(ore.pos().getX() >> 4, ore.pos().getZ() >> 4);
             ChunkPos chunk = new ChunkPos(chunkKey);
             if (!cache.containsKey(chunkKey)
@@ -258,6 +270,20 @@ public final class BlockEspController implements AutoCloseable {
         observedOres = observed;
         matchedOres = matched;
         trust = SeedTrust.assess(matched, observed - matched);
+    }
+
+    /**
+     * True when any face-neighbour in a loaded chunk does not fully occlude the block (air, cave
+     * openings, fluids, partial blocks). Neighbours in unloaded chunks prove nothing either way,
+     * so a marker ringed only by unloaded space is conservatively treated as unexposed.
+     */
+    private static boolean isExposed(ClientLevel level, net.minecraft.core.BlockPos pos) {
+        for (var direction : net.minecraft.core.Direction.values()) {
+            var neighbour = pos.relative(direction);
+            if (level.getChunkSource().getChunk(neighbour.getX() >> 4, neighbour.getZ() >> 4, ChunkStatus.FULL, false) == null) continue;
+            if (!level.getBlockState(neighbour).isSolidRender()) return true;
+        }
+        return false;
     }
 
     static ChunkPos nextChunk(int centerX, int centerZ, int radius, java.util.Set<Long> cached) {
@@ -283,6 +309,7 @@ public final class BlockEspController implements AutoCloseable {
         lastLevel = null;
         liveMarkers = List.of();
         liveCache.clear();
+        exposedLiveMarkers = List.of();
         trust = SeedTrust.State.UNKNOWN;
         matchedOres = observedOres = 0;
         status = message;
@@ -294,6 +321,7 @@ public final class BlockEspController implements AutoCloseable {
         markers = List.of();
         liveMarkers = List.of();
         liveCache.clear();
+        exposedLiveMarkers = List.of();
         trust = SeedTrust.State.UNKNOWN;
         matchedOres = observedOres = 0;
         completed = total = 0;
