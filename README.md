@@ -14,7 +14,7 @@ Unfortunately, BlockESP is currently patched on the server.
 
 1. Install Fabric Loader for Minecraft 1.21.11.
 2. Install Fabric API 0.141.4 or newer for Minecraft 1.21.11.
-3. Copy `donut-client-3.0.jar` into your Minecraft `mods` folder, replacing the previous Donut Client jar.
+3. Copy `donut-client-3.0.1.jar` into your Minecraft `mods` folder, replacing the previous Donut Client jar.
 4. Start Minecraft with the Fabric profile.
 
 Press **Right Shift** to open or close the click GUI with a short fade. Escape and the close button also fade out the menu. Freecam defaults to **F6**. Other module keys can be assigned in the click GUI or under Minecraft's keybind settings.
@@ -83,7 +83,7 @@ Install JDK 21, then run:
 .\gradlew.bat build
 ```
 
-The finished mod is written to `build/libs/donut-client-3.0.jar`.
+The finished mod is written to `build/libs/donut-client-3.0.1.jar`.
 
 ## License
 

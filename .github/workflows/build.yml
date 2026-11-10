@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [arena/39dbbfe2-donut-client-vitraxrevamp]
+    branches: [arena/dac2741d-donut-client-vitraxrevamp]
   workflow_dispatch:
 
 jobs:

@@ -25,6 +25,16 @@ jobs:
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
       - name: Build mod jar and run unit tests
         run: bash gradlew build --no-daemon --stacktrace
+      - name: Check the jar name matches the release tag
+        if: github.event_name == 'release'
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          version="${tag#v}"
+          ls build/libs/*.jar
+          if ! ls "build/libs/donut-client-${version}.jar" >/dev/null 2>&1; then
+            echo "::error::release $tag expects build/libs/donut-client-${version}.jar; bump mod_version in gradle.properties"
+            exit 1
+          fi
       - name: Upload mod jar as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
