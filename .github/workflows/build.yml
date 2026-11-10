@@ -19,6 +19,17 @@ jobs:
           distribution: 'temurin'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+      - name: Inspect mapped API (temporary diagnostics)
+        continue-on-error: true
+        run: |
+          jar=$(find ~/.gradle/caches -name "*named*.jar" | grep -i minecraft | head -1)
+          echo "inspecting $jar"
+          if [ -n "$jar" ]; then
+            javap -classpath "$jar" net.minecraft.world.level.StructureManager 2>&1 | head -20 | while IFS= read -r line; do echo "::error::API StructureManager $line"; done
+            javap -classpath "$jar" net.minecraft.world.level.chunk.ProtoChunk 2>&1 | grep -E "setBlockState|getHeight|fillBiomes|getOrCreateCarvingMask|getOrCreateNoiseChunk" | head -10 | while IFS= read -r line; do echo "::error::API ProtoChunk $line"; done
+            javap -classpath "$jar" net.minecraft.world.level.chunk.ChunkAccess 2>&1 | grep -E "fillBiomes|getHeight" | head -10 | while IFS= read -r line; do echo "::error::API ChunkAccess $line"; done
+            javap -classpath "$jar" net.minecraft.world.level.levelgen.Heightmap\$Types 2>&1 | head -20 | while IFS= read -r line; do echo "::error::API Heightmap.Types $line"; done
+          fi
       - name: Build and run unit tests
         run: |
           set -o pipefail
