@@ -24,11 +24,11 @@ jobs:
         run: |
           say() { printf '::error::API %s\n' "${1:0:370}"; }
           jar=""
-          for candidate in $(find "$HOME/.gradle/caches" "$PWD/.gradle" -name "*.jar" 2>/dev/null | grep -v sources | head -9000); do
+          for candidate in $(find /home/runner -name "*.jar" 2>/dev/null | grep -Ev "sources|gradle-[0-9]|wrapper" | grep -E "loom|minecraft|named|merged" | head -400); do
             if unzip -l "$candidate" 2>/dev/null | grep -q "net/minecraft/world/level/StructureManager.class"; then jar="$candidate"; break; fi
           done
-          say "JAR=$jar"; [ -n "$jar" ] || exit 0
-          one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -3 | tr '\n' '|'; }
+          say "JAR=$jar"; [ -n "$jar" ] || { say "no mapped jar found"; exit 0; }
+          one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
           one net.minecraft.world.level.StructureManager "StructureManager("
           one net.minecraft.world.level.chunk.PalettedContainerFactory "PalettedContainerFactory("
           one net.minecraft.world.level.levelgen.carver.CarvingContext "CarvingContext("
@@ -38,19 +38,16 @@ jobs:
           one net.minecraft.world.level.chunk.ChunkGenerator "getBiomeGenerationSettings"
           one net.minecraft.world.level.chunk.ChunkGenerator "generate("
           one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "isStartChunk"
-          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "carve"
           one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "carve("
           one net.minecraft.world.level.chunk.ProtoChunk "getHeight"
           one net.minecraft.world.level.chunk.ProtoChunk "fillBiomes"
           one net.minecraft.world.level.chunk.ProtoChunk "getNoiseChunk"
-          one net.minecraft.world.level.chunk.ProtoChunk "getSections"
           one net.minecraft.world.level.chunk.ProtoChunk "getHeightAccessorForGeneration"
           one net.minecraft.world.level.chunk.LevelChunkSection "getBiomes"
           one net.minecraft.world.level.chunk.LevelChunkSection "copy("
           one net.minecraft.world.level.chunk.LevelChunkSection "getSectionYFromSectionIndex"
           one net.minecraft.world.level.biome.MultiNoiseBiomeSource "createFromPreset"
           one net.minecraft.world.level.levelgen.structure.StructureSet "placement("
-          one net.minecraft.world.level.levelgen.structure.BuiltinStructureSets "MINESHAFTS"
           one net.minecraft.world.level.WorldGenLevel "getHeightmapPos"
           one net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement "getPotentialStructureChunk"
 
