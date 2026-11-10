@@ -20,44 +20,40 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
       - name: Inspect mapped API (temporary diagnostics)
-        continue-on-error: true
-        run: |
-          jar=$(find ~/.gradle/caches -name "*named*.jar" | grep -i minecraft | head -1)
-          echo "inspecting $jar"
-          if [ -n "$jar" ]; then
-            javap -classpath "$jar" net.minecraft.world.level.StructureManager 2>&1 | head -20 | while IFS= read -r line; do echo "::error::API StructureManager $line"; done
-            javap -classpath "$jar" net.minecraft.world.level.chunk.ProtoChunk 2>&1 | grep -E "setBlockState|getHeight|fillBiomes|getOrCreateCarvingMask|getOrCreateNoiseChunk" | head -10 | while IFS= read -r line; do echo "::error::API ProtoChunk $line"; done
-            javap -classpath "$jar" net.minecraft.world.level.chunk.ChunkAccess 2>&1 | grep -E "fillBiomes|getHeight" | head -10 | while IFS= read -r line; do echo "::error::API ChunkAccess $line"; done
-            javap -classpath "$jar" net.minecraft.world.level.levelgen.Heightmap\$Types 2>&1 | head -20 | while IFS= read -r line; do echo "::error::API Heightmap.Types $line"; done
-          fi
-      - name: Build and run unit tests
-        run: |
-          set -o pipefail
-          bash gradlew build --no-daemon --stacktrace 2>&1 | tee gradle.log
-      - name: Inspect mapped API (temporary diagnostics)
         if: always()
         run: |
-          say() { echo "::error::API ${1:0:380}"; }
+          say() { printf '::error::API %s\n' "${1:0:370}"; }
           jar=""
-          for candidate in $(find "$HOME/.gradle/caches" "$PWD/.gradle" -name "*.jar" 2>/dev/null | grep -v sources | head -6000); do
+          for candidate in $(find "$HOME/.gradle/caches" "$PWD/.gradle" -name "*.jar" 2>/dev/null | grep -v sources | head -9000); do
             if unzip -l "$candidate" 2>/dev/null | grep -q "net/minecraft/world/level/StructureManager.class"; then jar="$candidate"; break; fi
           done
-          say "JAR=$jar"
-          [ -n "$jar" ] || exit 0
-          dump() { javap -classpath "$jar" "$1" 2>&1 | grep -E "$2" | tr '\n' '|' ; }
-          say "SM ctor: $(dump net.minecraft.world.level.StructureManager 'StructureManager(')"
-          say "ProtoChunk: $(dump net.minecraft.world.level.chunk.ProtoChunk 'setBlockState|getHeight\(|fillBiomes|CarvingMask|NoiseChunk|getSections|getHeightAccessorForGeneration')"
-          say "ChunkAccess: $(dump net.minecraft.world.level.chunk.ChunkAccess 'fillBiomes|getHeight\(|getMinSectionY|getSectionYFrom')"
-          say "ChunkGenerator: $(dump net.minecraft.world.level.chunk.ChunkGenerator 'fillFromNoise|buildSurface|getBiomeGenerationSettings|generate\(|createStructures|applyCarvers')"
-          say "FeatureSorter: $(dump 'net.minecraft.world.level.biome.FeatureSorter$StepFeatureData' 'features|indexMapping')"
-          say "PlacedFeature: $(dump net.minecraft.world.level.levelgen.placement.PlacedFeature 'placeWithBiomeCheck|placement\(')"
-          say "Structure: $(dump net.minecraft.world.level.levelgen.structure.Structure 'generate\(|step\(')"
-          say "HeightmapTypes: $(dump 'net.minecraft.world.level.levelgen.Heightmap$Types' 'OCEAN_FLOOR_WG|isOpaque|isOpaque')"
-          say "PalettedContainerFactory: $(dump net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory(')"
-          say "LevelChunkSection: $(dump net.minecraft.world.level.chunk.LevelChunkSection 'getBiomes|copy\(|maybeHas|getSectionYFrom')"
-          say "CarvingContext: $(dump net.minecraft.world.level.levelgen.carver.CarvingContext 'CarvingContext(')"
-          say "Carver: $(dump net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'isStartChunk|carve\(')"
-          say "StructurePiece: $(dump net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
+          say "JAR=$jar"; [ -n "$jar" ] || exit 0
+          one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -3 | tr '\n' '|'; }
+          one net.minecraft.world.level.StructureManager "StructureManager("
+          one net.minecraft.world.level.chunk.PalettedContainerFactory "PalettedContainerFactory("
+          one net.minecraft.world.level.levelgen.carver.CarvingContext "CarvingContext("
+          one net.minecraft.world.level.levelgen.structure.StructurePiece "postProcess"
+          one net.minecraft.world.level.chunk.ChunkGenerator "fillFromNoise"
+          one net.minecraft.world.level.chunk.ChunkGenerator "buildSurface"
+          one net.minecraft.world.level.chunk.ChunkGenerator "getBiomeGenerationSettings"
+          one net.minecraft.world.level.chunk.ChunkGenerator "generate("
+          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "isStartChunk"
+          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "carve"
+          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "carve("
+          one net.minecraft.world.level.chunk.ProtoChunk "getHeight"
+          one net.minecraft.world.level.chunk.ProtoChunk "fillBiomes"
+          one net.minecraft.world.level.chunk.ProtoChunk "getNoiseChunk"
+          one net.minecraft.world.level.chunk.ProtoChunk "getSections"
+          one net.minecraft.world.level.chunk.ProtoChunk "getHeightAccessorForGeneration"
+          one net.minecraft.world.level.chunk.LevelChunkSection "getBiomes"
+          one net.minecraft.world.level.chunk.LevelChunkSection "copy("
+          one net.minecraft.world.level.chunk.LevelChunkSection "getSectionYFromSectionIndex"
+          one net.minecraft.world.level.biome.MultiNoiseBiomeSource "createFromPreset"
+          one net.minecraft.world.level.levelgen.structure.StructureSet "placement("
+          one net.minecraft.world.level.levelgen.structure.BuiltinStructureSets "MINESHAFTS"
+          one net.minecraft.world.level.WorldGenLevel "getHeightmapPos"
+          one net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement "getPotentialStructureChunk"
+
       - name: Surface build errors as annotations
         if: failure()
         run: |
