@@ -52,7 +52,9 @@ class NearestEmeraldSearchTest {
 
     @Test void searchesOnlyAroundTheClosestCandidatesAndOrdersByDistance() {
         var columns = new java.util.HashSet<Long>();
-        for (int x = -1500; x <= 1500; x += 32) columns.add(column(x, 0));
+        // Emerald columns every 32 blocks along z = 0; 0 must be one of them because the search samples
+        // fromX + k * GRID.
+        for (int x = -480; x <= 480; x += 32) columns.add(column(x, 0));
         var biomeField = biomes(columns);
         var candidates = NearestEmeraldSearch.candidates(biomeField, 0, 0, 1500, Set.of());
         assertTrue(candidates.size() >= NearestEmeraldSearch.CANDIDATES, "expected at least a candidate per close ring, got " + candidates.size());

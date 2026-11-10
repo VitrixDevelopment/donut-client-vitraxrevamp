@@ -58,7 +58,7 @@ class AreaVerdictsTest {
         assertEquals(AreaVerdicts.Status.CONFIRMED, verdicts.status(area), "A reached vein counts double");
         assertEquals(3, verdicts.hits(area));
         assertEquals(0, verdicts.misses(area));
-        assertEquals(AreaVerdicts.Status.CONFIRMED, verdicts.count(AreaVerdicts.Status.CONFIRMED));
+        assertEquals(1, verdicts.count(AreaVerdicts.Status.CONFIRMED), "one area holds that verdict");
         assertEquals(1, verdicts.areas().size());
         assertTrue(verdicts.isDirty());
     }
