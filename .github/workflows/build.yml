@@ -27,13 +27,30 @@ jobs:
           jar=$(grep '^MAPPED ' jars.txt | grep -v sources | head -1 | sed 's/^MAPPED //')
           say "JAR=$jar"; [ -n "$jar" ] || { head -5 jars.txt | while IFS= read -r l; do say "$l"; done; exit 0; }
           one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
-          out=$(javap -classpath "$jar" net.minecraft.world.level.StructureManager net.minecraft.world.level.chunk.PalettedContainerFactory net.minecraft.world.level.levelgen.carver.CarvingContext 2>&1 | grep -E "StructureManager\(|PalettedContainerFactory\(|CarvingContext\(" | tr -s ' ' | tr '\n' '|')
-          say "CTORS: $out"
-          for i in 1 2 3 4 5 6 7 8; do
-            line=$(javap -classpath "$jar" net.minecraft.world.level.StructureManager 2>&1 | grep -E "StructureManager\(" | sed -n "${i}p")
-            [ -n "$line" ] || continue
-            echo "$line" | fold -w 300 | while IFS= read -r part; do say "SM${i}: $part"; done
-          done
+          cp=$(find .gradle/loom-cache/minecraftMaven -name "*.jar" 2>/dev/null | grep -v sources | tr '\n' ':')
+          say "CP entries: $(echo "$cp" | tr ':' '\n' | grep -c jar)"
+          one() { javap -classpath "$cp" "$1" 2>&1 | grep -F "$2" | head -2 | tr -s ' ' | tr '\n' '|'; }
+          say "SM: $(one net.minecraft.world.level.StructureManager 'StructureManager(')"
+          say "PCF: $(one net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory(')"
+          say "CTX: $(one net.minecraft.world.level.levelgen.carver.CarvingContext 'CarvingContext(')"
+          say "PIECE: $(one net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
+          say "FILL: $(one net.minecraft.world.level.chunk.ChunkGenerator 'fillFromNoise')"
+          say "SURF: $(one net.minecraft.world.level.chunk.ChunkGenerator 'buildSurface')"
+          say "BGS: $(one net.minecraft.world.level.chunk.ChunkGenerator 'getBiomeGenerationSettings')"
+          say "GEN: $(one net.minecraft.world.level.chunk.ChunkGenerator 'generate(')"
+          say "CARVE: $(one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'carve(')"
+          say "START: $(one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'isStartChunk')"
+          say "PH: $(one net.minecraft.world.level.chunk.ProtoChunk 'getHeight')"
+          say "PFB: $(one net.minecraft.world.level.chunk.ProtoChunk 'fillBiomes')"
+          say "PNC: $(one net.minecraft.world.level.chunk.ProtoChunk 'getNoiseChunk')"
+          say "PGC: $(one net.minecraft.world.level.chunk.ProtoChunk 'getHeightAccessorForGeneration')"
+          say "SECB: $(one net.minecraft.world.level.chunk.LevelChunkSection 'getBiomes')"
+          say "SECC: $(one net.minecraft.world.level.chunk.LevelChunkSection 'copy(')"
+          say "SECTY: $(one net.minecraft.world.level.chunk.LevelChunkSection 'getSectionYFromSectionIndex')"
+          say "HMP: $(one net.minecraft.world.level.WorldGenLevel 'getHeightmapPos')"
+          say "RSP: $(one net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement 'getPotentialStructureChunk')"
+          say "MNBS: $(one net.minecraft.world.level.biome.MultiNoiseBiomeSource 'createFromPreset')"
+
       - name: Surface build errors as annotations
         if: failure()
         run: |
