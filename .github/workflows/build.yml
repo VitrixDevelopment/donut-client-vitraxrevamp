@@ -34,6 +34,30 @@ jobs:
         run: |
           set -o pipefail
           bash gradlew build --no-daemon --stacktrace 2>&1 | tee gradle.log
+      - name: Inspect mapped API (temporary diagnostics)
+        if: always()
+        run: |
+          say() { echo "::error::API ${1:0:380}"; }
+          jar=""
+          for candidate in $(find "$HOME/.gradle/caches" "$PWD/.gradle" -name "*.jar" 2>/dev/null | grep -v sources | head -6000); do
+            if unzip -l "$candidate" 2>/dev/null | grep -q "net/minecraft/world/level/StructureManager.class"; then jar="$candidate"; break; fi
+          done
+          say "JAR=$jar"
+          [ -n "$jar" ] || exit 0
+          dump() { javap -classpath "$jar" "$1" 2>&1 | grep -E "$2" | tr '\n' '|' ; }
+          say "SM ctor: $(dump net.minecraft.world.level.StructureManager 'StructureManager(')"
+          say "ProtoChunk: $(dump net.minecraft.world.level.chunk.ProtoChunk 'setBlockState|getHeight\(|fillBiomes|CarvingMask|NoiseChunk|getSections|getHeightAccessorForGeneration')"
+          say "ChunkAccess: $(dump net.minecraft.world.level.chunk.ChunkAccess 'fillBiomes|getHeight\(|getMinSectionY|getSectionYFrom')"
+          say "ChunkGenerator: $(dump net.minecraft.world.level.chunk.ChunkGenerator 'fillFromNoise|buildSurface|getBiomeGenerationSettings|generate\(|createStructures|applyCarvers')"
+          say "FeatureSorter: $(dump 'net.minecraft.world.level.biome.FeatureSorter$StepFeatureData' 'features|indexMapping')"
+          say "PlacedFeature: $(dump net.minecraft.world.level.levelgen.placement.PlacedFeature 'placeWithBiomeCheck|placement\(')"
+          say "Structure: $(dump net.minecraft.world.level.levelgen.structure.Structure 'generate\(|step\(')"
+          say "HeightmapTypes: $(dump 'net.minecraft.world.level.levelgen.Heightmap$Types' 'OCEAN_FLOOR_WG|isOpaque|isOpaque')"
+          say "PalettedContainerFactory: $(dump net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory(')"
+          say "LevelChunkSection: $(dump net.minecraft.world.level.chunk.LevelChunkSection 'getBiomes|copy\(|maybeHas|getSectionYFrom')"
+          say "CarvingContext: $(dump net.minecraft.world.level.levelgen.carver.CarvingContext 'CarvingContext(')"
+          say "Carver: $(dump net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'isStartChunk|carve\(')"
+          say "StructurePiece: $(dump net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
       - name: Surface build errors as annotations
         if: failure()
         run: |
