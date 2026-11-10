@@ -19,12 +19,16 @@ jobs:
           distribution: 'temurin'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
-      - name: Surface build errors as annotations
-        if: failure()
+      - name: Build and run unit tests
         run: |
+          set -o pipefail
+          bash gradlew build --no-daemon --stacktrace 2>&1 | tee gradle.log || echo "BUILD_FAILED" >> gradle.log
+      - name: Surface build errors as annotations
+        if: always()
+        run: |
+          [ -f gradle.log ] || exit 0
           for f in build/test-results/test/*.xml; do
             [ -f "$f" ] || continue
-            grep -o 'testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "$f" | while IFS= read -r line; do echo "::error::TEST $line"; done
             python3 - "$f" <<'PYEOF' | while IFS= read -r line; do echo "::error::FAILED $line"; done
           import sys, xml.etree.ElementTree as ET
           for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
@@ -33,17 +37,17 @@ jobs:
                       print(case.get("classname") + "." + case.get("name") + " :: " + (bad.get("message") or "")[:300])
           PYEOF
           done
-          grep -E "error:" gradle.log | sed 's#.*/src/#src/#' | head -60 | while IFS= read -r line; do
+          grep -E "error:" gradle.log | sed 's#.*/donut-client-vitraxrevamp/src/#src/#' | head -80 | while IFS= read -r line; do
             echo "::error::COMPILE $line"
           done
-          grep -E "error:|FAILURE:|What went wrong|Could not|Execution failed" -A 6 gradle.log | head -80 | while IFS= read -r line; do
+          grep -E "What went wrong|Execution failed|FAILURE:" -A 4 gradle.log | head -60 | while IFS= read -r line; do
             clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
-            [ -n "$clean" ] && echo "::error::$clean"
+            [ -n "$clean" ] && echo "::error::BUILD $clean"
           done
-          tail -60 gradle.log | while IFS= read -r line; do
-            clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
-            [ -n "$clean" ] && echo "::warning::LOG $clean"
-          done
+      - name: Fail when compilation or tests failed
+        if: always()
+        run: |
+          if grep -q "BUILD_FAILED" gradle.log; then exit 1; fi
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,8 +56,9 @@ jobs:
           path: gradle.log
           if-no-files-found: ignore
       - name: Upload mod jar
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: donut-client
           path: build/libs/*.jar
-          if-no-files-found: error
+          if-no-files-found: ignore
