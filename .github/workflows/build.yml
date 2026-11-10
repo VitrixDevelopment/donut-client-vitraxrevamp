@@ -28,21 +28,16 @@ jobs:
           say "JAR=$jar"; [ -n "$jar" ] || { head -5 jars.txt | while IFS= read -r l; do say "$l"; done; exit 0; }
           one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
           cp=$(find .gradle/loom-cache/minecraftMaven -name "*.jar" 2>/dev/null | grep -v sources | tr '\n' ':')
-          # Print every matching line, split into 330-character annotations so nothing is truncated.
-          dump() {
-            javap -classpath "$cp" "$1" 2>&1 | grep -E "$2" | tr -s ' ' | while IFS= read -r line; do
-              echo "$line" | fold -w 330 | while IFS= read -r part; do say "$3 $part"; done
-            done
-          }
-          dump net.minecraft.world.level.chunk.ChunkGenerator 'buildSurface|applyCarvers|fillFromNoise' CG
-          dump net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator 'NoiseBasedChunkGenerator\(|buildSurface|applyCarvers|fillFromNoise' NBCG
-          dump net.minecraft.world.level.levelgen.SurfaceSystem 'buildSurface' SURSYS
-          dump net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'isStartChunk|carve' CARVER
-          dump net.minecraft.world.level.levelgen.structure.Structure 'generate\(' STRUCT
-          dump net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory\(|create' PCF
-          dump net.minecraft.world.level.chunk.ProtoChunk 'Noise|Carving|Biomes|getSections|getHeight' PC
-          dump net.minecraft.world.level.chunk.ChunkAccess 'getOrCreateNoiseChunk|getNoiseChunk|applyCarvers' CA
-          dump net.minecraft.world.level.levelgen.WorldGenerationContext 'WorldGenerationContext\(' WGC
+          d() { javap -classpath "$cp" "$1" 2>&1 | grep -E "$2" | tr -s ' ' | tr '\n' '|' | cut -c1-330; }
+          say "CARVER: $(d net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'carve|isStartChunk')"
+          say "PCNOISE: $(d net.minecraft.world.level.chunk.ProtoChunk 'Noise|Carving|getHeight\(')"
+          say "PCF: $(d net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory\(')"
+          say "CA: $(d net.minecraft.world.level.chunk.ChunkAccess 'Noise|SectionY|getMinSection')"
+          say "STRUCT: $(d net.minecraft.world.level.levelgen.structure.Structure 'generate\(')"
+          say "LCS: $(d net.minecraft.world.level.chunk.LevelChunkSection 'copy\(|getBiomes')"
+          say "CHUNKGEN2: $(d net.minecraft.world.level.chunk.ChunkGenerator 'getBiomeGenerationSettings|createStructures|spawnOriginalMobs')"
+          say "SSET: $(d net.minecraft.world.level.levelgen.structure.StructureSet 'placement\(')"
+          say "PIECE2: $(d net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
 
       - name: Surface build errors as annotations
         if: failure()
