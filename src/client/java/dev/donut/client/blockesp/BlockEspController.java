@@ -65,6 +65,9 @@ public final class BlockEspController implements AutoCloseable {
     private OrePredictorEngine engine;
     private long engineSeed;
     private String engineName = "";
+    // Set on the worker when the seed simulation throws and the vanilla world takes over.
+    private volatile boolean fellBack;
+    private volatile boolean fallbackNoticePending;
     // Verification state, touched only from the client thread.
     private final AreaVerdicts verdicts = new AreaVerdicts();
     private final MinedEvidence mined = new MinedEvidence();
@@ -166,6 +169,10 @@ public final class BlockEspController implements AutoCloseable {
         publish(client);
         verify(client);
         updateNearest(client);
+        if (fallbackNoticePending) {
+            fallbackNoticePending = false;
+            notice("Seed simulation failed here - switched to the vanilla world engine (see latest.log)");
+        }
         if (++ticksSinceSave >= 200) saveVerdicts();
         if (failed) return;
         if (pending == null) {
@@ -188,12 +195,54 @@ public final class BlockEspController implements AutoCloseable {
                 engineSeed = requestedSeed;
             }
             if (token != revision.get()) return null;
-            return new Result(token, chunk.toLong(), engine.predict(chunk.x, chunk.z));
+            return new Result(token, chunk.toLong(), predictChunk(chunk.x, chunk.z));
         } catch (Exception error) {
             if (token != revision.get()) return null;
             throw new java.util.concurrent.CompletionException(error);
         } finally {
             if (token != revision.get()) releaseEngine();
+        }
+    }
+
+    /**
+     * Prediction with a fallback: if the seed simulation throws (a mapping or API change, an unsupported registry
+     * call), the vanilla world engine takes over for the rest of the session instead of leaving the module broken.
+     * Both are worker-thread only.
+     */
+    private List<OreMarker> predictChunk(int chunkX, int chunkZ) {
+        try {
+            return engine.predict(chunkX, chunkZ);
+        } catch (RuntimeException | LinkageError error) {
+            if (!(engine instanceof OrePredictorEngine.SeedTerrainAdapter)) throw error;
+            LOGGER.error("BlockESP seed simulation failed; switching to the vanilla world engine", error);
+            fallbackToVanillaWorld();
+            return engine.predict(chunkX, chunkZ);
+        }
+    }
+
+    /** Predicted deepslate emeralds for the search, with the same fallback as chunk prediction. */
+    private List<BlockPos> predictEmerald(int chunkX, int chunkZ) {
+        try {
+            return engine.deepslateEmerald(chunkX, chunkZ);
+        } catch (RuntimeException | LinkageError error) {
+            if (!(engine instanceof OrePredictorEngine.SeedTerrainAdapter)) throw error;
+            LOGGER.error("BlockESP seed simulation failed during the emerald search; switching to the vanilla world engine", error);
+            fallbackToVanillaWorld();
+            return engine.deepslateEmerald(chunkX, chunkZ);
+        }
+    }
+
+    private void fallbackToVanillaWorld() {
+        long requestedSeed = engineSeed;
+        releaseEngine();
+        try {
+            engine = OrePredictorEngine.vanillaWorld(requestedSeed, scratchParent);
+            engineSeed = requestedSeed;
+            engineName = "Vanilla world";
+            fellBack = true;
+            fallbackNoticePending = true;
+        } catch (Exception | Error fatal) {
+            throw new IllegalStateException("BlockESP could not start the vanilla world engine", fatal);
         }
     }
 
@@ -213,8 +262,8 @@ public final class BlockEspController implements AutoCloseable {
         return OrePredictorEngine.seedTerrain(requestedSeed);
     }
 
-    /** Which engine produced the current markers. */
-    public String engineName() { return engineName; }
+    /** Which engine produced the current markers, plus a note when the simulation fell back. */
+    public String engineName() { return fellBack ? engineName + " (fallback)" : engineName; }
 
     /** Label of the configured engine, without building it. */
     public static String engineLabel(String engine) {
@@ -303,6 +352,8 @@ public final class BlockEspController implements AutoCloseable {
         // Sampling every marker in range is cheap per chunk but not per tick; a second is plenty.
         if (settings.minedTest && ++ticksSinceMinedTest >= 20) {
             ticksSinceMinedTest = 0;
+        fellBack = false;
+        fallbackNoticePending = false;
             minedTest(level);
         }
     }
@@ -460,8 +511,7 @@ public final class BlockEspController implements AutoCloseable {
                     engine = createEngine(requestedSeed);
                     engineSeed = requestedSeed;
                 }
-                var active = engine;
-                var found = NearestEmeraldSearch.search(biomes, active::deepslateEmerald,
+                var found = NearestEmeraldSearch.search(biomes, this::predictEmerald,
                         from.getX(), from.getY(), from.getZ(), rangeBlocks, unmatched, removed, null);
                 if (token != revision.get()) return;
                 // Both engines only report the deepslate variants, so every result is deepslate emerald.
@@ -550,6 +600,8 @@ public final class BlockEspController implements AutoCloseable {
         realSeen.clear();
         mined.reset();
         ticksSinceMinedTest = 0;
+        fellBack = false;
+        fallbackNoticePending = false;
         emeraldList = List.of();
         emeraldGone.clear();
         deepslateEmerald.clear();

@@ -63,8 +63,13 @@ public final class SeedTerrainEngine implements AutoCloseable {
         PlacedFeature coalUpper = placed.getOrThrow(placedKey("ore_coal_upper")).value();
         PlacedFeature coalLower = placed.getOrThrow(placedKey("ore_coal_lower")).value();
         PlacedFeature emerald = placed.getOrThrow(placedKey("ore_emerald")).value();
+        // Carving resolves carvers and configured features from the registry access while caves are cut, so the
+        // full vanilla registry access is handed over. A stub only answers lookupOrThrow(BIOME), which is all the
+        // surface rules need; anything else has to be real or generation fails at runtime.
         terrain = new SeedTerrain(seed, MIN_Y, HEIGHT, source, randomState,
-                new NoiseBasedChunkGenerator(source, settings), settings, lookup, null, coalUpper, coalLower, emerald);
+                new NoiseBasedChunkGenerator(source, settings), settings, lookup,
+                (net.minecraft.core.RegistryAccess) registries(),
+                coalUpper, coalLower, emerald);
     }
 
     private static ResourceKey<PlacedFeature> placedKey(String path) {

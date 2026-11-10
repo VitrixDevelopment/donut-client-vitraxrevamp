@@ -128,21 +128,11 @@ public final class SeedTerrain {
             }
         };
         this.biomeRegistry = stub(Registry.class);
-        // Surface rules ask for the biome registry while carving but never read it; hand back the stub.
+        // Surface rules ask for the biome registry while carving but never read it; the stub answers that lookup.
+        // Everything else on the registry access is used for real: carving resolves configured features and
+        // carvers through it, so a stubbed access fails with UnsupportedOperationException as soon as a cave is cut.
         Registry<Biome> biomes = this.biomeRegistry;
-        this.registryAccess = registryAccess != null ? registryAccess : (RegistryAccess) java.lang.reflect.Proxy.newProxyInstance(
-                RegistryAccess.class.getClassLoader(), new Class<?>[] {RegistryAccess.class}, (proxy, method, args) -> {
-                    if (method.getName().equals("lookupOrThrow")) {
-                        return biomes;
-                    }
-                    if (method.getName().equals("hashCode")) {
-                        return System.identityHashCode(proxy);
-                    }
-                    if (method.getName().equals("equals")) {
-                        return proxy == args[0];
-                    }
-                    throw new UnsupportedOperationException("RegistryAccess." + method.getName());
-                });
+        this.registryAccess = registryAccess != null ? registryAccess : biomeLookupStub(biomes);
         this.steps = FeatureSorter.buildFeaturesPerStep(List.copyOf(source.possibleBiomes()),
                 biome -> biome.value().getGenerationSettings().features(), true);
         int step = -1;
@@ -271,6 +261,26 @@ public final class SeedTerrain {
             }
             return null;
         }
+    }
+
+    /** A registry access whose only supported call is {@code lookupOrThrow(Registries.BIOME)}. */
+    private static RegistryAccess biomeLookupStub(Registry<Biome> biomes) {
+        return (RegistryAccess) java.lang.reflect.Proxy.newProxyInstance(
+                RegistryAccess.class.getClassLoader(), new Class<?>[] {RegistryAccess.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("lookupOrThrow")) {
+                        return biomes;
+                    }
+                    if (method.getName().equals("hashCode")) {
+                        return System.identityHashCode(proxy);
+                    }
+                    if (method.getName().equals("equals")) {
+                        return proxy == args[0];
+                    }
+                    if (method.getName().equals("toString")) {
+                        return "SeedTerrainRegistryAccess";
+                    }
+                    throw new UnsupportedOperationException("RegistryAccess." + method.getName());
+                });
     }
 
     @SuppressWarnings("unchecked")
