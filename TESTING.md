@@ -16,6 +16,21 @@ The multiplayer Fly suite uses a dedicated server bound to localhost and logs a 
 - Native GUI checks cover search, Favorites, completion controls, malformed names, duplicate rejection, username/UUID addition, row removal, evidence navigation, settings persistence, the real production shortcut and restoration, and GUI scales 1 and 2. Visually reviewed the HUD, roster and settings at both scales. Captures are saved as `docs/screenshots/staff-detector-*.png`.
 - Inspected the remapped **1.21.0** JAR for all staff detector classes and verified it contains no unit/game-test classes. Source and release JARs are under `build/libs/`. No external-server vanish plugin, precision/recall measurement or packet-storm performance benchmark was tested. See [the Staff Detector guide](docs/staff-detector.md) for observation semantics and setup.
 
+## Added in this branch (not yet built here)
+
+The area-verification work was written and parsed here, not compiled or run: this checkout has no JDK 21, no Gradle
+caches, and no access to the Fabric/Mojang Maven hosts, so `./gradlew test` and `runClientGameTest` still need one local
+run before release.
+
+New unit tests cover the pure logic only: `AreaVerdictsTest` (8x8 chunk floors at negative coordinates, confirm/reject
+thresholds, weighted evidence, file round-trip, damaged lines), `MinedEvidenceTest` (packing compatible with
+`BlockPos.asLong`, controls two blocks away, no double counting, mining versus cave air), `NearestEmeraldSearchTest`
+(ring walk, 256-1500 clamp, 3x3 candidate neighbourhoods, distance order, skipped rejected areas and mined blocks) and
+`BlockEspHudLinesTest` (line truncation, relative arrows and compass letters). Runtime behavior still needs the focused
+BlockESP game test, extended with: confirming a matching area from a placed exposed ore, rejecting an area from four
+placed ores the prediction does not hold, the mined test on a dug-out predicted vein, and a nearest-emerald card for a
+mountain area.
+
 ## Verified on 2026-11-06 (1.20.0 BlockESP)
 
 - `build runClientGameTest -PblockEspTestsOnly=true --offline --no-daemon` passed with JDK 21: **133 unit tests**, BlockEspGameTest, BlockEspGuiGameTest, and the existing ModuleKeybindGameTest. The source test manifest retains the complete suite; the focused flag changes processed test resources only. The release JAR contains version **1.20.0** and excludes test classes.

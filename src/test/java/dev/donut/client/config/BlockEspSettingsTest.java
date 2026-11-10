@@ -40,6 +40,34 @@ class BlockEspSettingsTest {
         assertTrue(Files.readString(directory.resolve("settings.json")).contains("\"6608149111735331168\""));
     }
 
+    @Test void areaVerificationAndEmeraldSearchDefaultsAndPersistence() throws Exception {
+        var defaults = new BlockEspSettings();
+        assertTrue(defaults.verifyAreas, "Area checking is on: without it the module shows wrong ore after an RTP");
+        assertTrue(defaults.minedTest);
+        assertTrue(defaults.nearestEmerald);
+        assertFalse(defaults.showUnmatched, "Areas that do not match the seed are hidden by default");
+        assertFalse(defaults.confirmedOnly);
+        assertFalse(defaults.chatNotices);
+        assertEquals(1500, defaults.emeraldSearchRange);
+
+        var store = new ConfigStore(directory.resolve("areas.json"));
+        var config = new ClientConfig();
+        config.blockEsp.confirmedOnly = true;
+        config.blockEsp.showUnmatched = true;
+        config.blockEsp.chatNotices = true;
+        config.blockEsp.minedTest = false;
+        config.blockEsp.nearestEmerald = false;
+        config.blockEsp.emeraldSearchRange = 4000;
+        store.save(config);
+        var value = store.load().blockEsp;
+        assertTrue(value.confirmedOnly && value.showUnmatched && value.chatNotices);
+        assertFalse(value.minedTest || value.nearestEmerald);
+        assertEquals(1500, value.emeraldSearchRange, "The search range is capped at 1500 blocks");
+        value.emeraldSearchRange = 1;
+        value.sanitize();
+        assertEquals(256, value.emeraldSearchRange, "The search range never drops below 256 blocks");
+    }
+
     @Test void numericValidationCoversSignedLimitsAndRejectsLossyOrMalformedSeeds() {
         assertEquals(Long.MIN_VALUE, BlockEspSettings.parseSeed("-9223372036854775808"));
         assertEquals(Long.MAX_VALUE, BlockEspSettings.parseSeed("9223372036854775807"));

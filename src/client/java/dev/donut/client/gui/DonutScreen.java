@@ -996,6 +996,29 @@ public final class DonutScreen extends Screen {
         slider(g, "opacity", "Opacity", 0, () -> value.opacity, next -> value.opacity = (int) next, 0, 255, 1, "");
         settingToggle(g, "tracers", "Tracers", 0, () -> value.tracers, () -> value.tracers = !value.tracers);
         settingToggle(g, "showHud", "Coordinates / distance HUD", 0, () -> value.showHud, () -> value.showHud = !value.showHud);
+        section(g, "Area verification", 0);
+        settingToggle(g, "verifyAreas", "Check areas with real ore", 0, () -> value.verifyAreas,
+                () -> value.verifyAreas = !value.verifyAreas);
+        settingToggle(g, "confirmedOnly", "Confirmed areas only", 0, () -> value.confirmedOnly,
+                () -> value.confirmedOnly = !value.confirmedOnly);
+        settingToggle(g, "showUnmatched", "Show areas that do not match", 0, () -> value.showUnmatched,
+                () -> value.showUnmatched = !value.showUnmatched);
+        settingToggle(g, "chatNotices", "Chat notices", 0, () -> value.chatNotices, () -> value.chatNotices = !value.chatNotices);
+        button(g, "m13.clearAreas", "Clear learned area evidence", rowX, settingsCursor, rowW, s(34), () -> {
+            var current = dev.donut.client.blockesp.BlockEspController.get();
+            if (current != null) current.clearAreas();
+        });
+        settingsCursor += s(44);
+        help(g, "Exposed ore decides whether an area follows the seed. Areas where the server placed ore differently are hidden and remembered.");
+        section(g, "Mined check", 0);
+        settingToggle(g, "minedTest", "Air check beside veins", 0, () -> value.minedTest, () -> value.minedTest = !value.minedTest);
+        help(g, "Compares predicted blocks that are already air or liquid with control spots beside them.");
+        section(g, "Nearest emerald", 0);
+        settingToggle(g, "nearestEmerald", "Nearest emerald card", 0, () -> value.nearestEmerald,
+                () -> value.nearestEmerald = !value.nearestEmerald);
+        slider(g, "emeraldSearchRange", "Search range", 0, () -> value.emeraldSearchRange,
+                next -> value.emeraldSearchRange = (int) next, 256, 1500, 32, " blocks");
+        help(g, "Searches mountain biomes from the seed and generates only the closest ones, skipping areas that do not match.");
         section(g, "Predictions", 0);
         var controller = dev.donut.client.blockesp.BlockEspController.get();
         help(g, controller == null ? "Enable BlockESP in a world to predict ores." : controller.status());
