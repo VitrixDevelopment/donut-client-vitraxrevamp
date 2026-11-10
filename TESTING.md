@@ -26,7 +26,12 @@ New unit tests cover the pure logic only: `AreaVerdictsTest` (8x8 chunk floors a
 thresholds, weighted evidence, file round-trip, damaged lines), `MinedEvidenceTest` (packing compatible with
 `BlockPos.asLong`, controls two blocks away, no double counting, mining versus cave air), `NearestEmeraldSearchTest`
 (ring walk, 256-1500 clamp, 3x3 candidate neighbourhoods, distance order, skipped rejected areas and mined blocks) and
-`BlockEspHudLinesTest` (line truncation, relative arrows and compass letters). Runtime behavior still needs the focused
+`BlockEspHudLinesTest` (line truncation, relative arrows and compass letters). The newly ported `SeedTerrain` engine (`SeedTerrain.java` + `SeedTerrainEngine.java`, selected through
+`OrePredictorEngine`) still has to be compared against fresh vanilla chunks in the game test before it is trusted: the
+port changed the package, `ChunkPos.pack` to `ChunkPos.asLong`, the record accessors and the `StructureManager`
+constructor to this repository's mappings, and those are the lines to watch first.
+
+Runtime behavior still needs the focused
 BlockESP game test, extended with: confirming a matching area from a placed exposed ore, rejecting an area from four
 placed ores the prediction does not hold, the mined test on a dug-out predicted vein, and a nearest-emerald card for a
 mountain area.

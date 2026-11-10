@@ -68,6 +68,28 @@ class BlockEspSettingsTest {
         assertEquals(256, value.emeraldSearchRange, "The search range never drops below 256 blocks");
     }
 
+    @Test void theSeedSimulationEngineIsTheDefaultAndPersists() throws Exception {
+        assertEquals(BlockEspSettings.ENGINE_SIMULATION, new BlockEspSettings().engine);
+        assertTrue(BlockEspSettings.ENGINES.contains(BlockEspSettings.ENGINE_WORLD));
+        assertTrue(BlockEspSettings.ENGINES.contains(BlockEspSettings.ENGINE_SIMULATION));
+
+        var store = new ConfigStore(directory.resolve("engine.json"));
+        var config = new ClientConfig();
+        config.blockEsp.engine = BlockEspSettings.ENGINE_WORLD;
+        store.save(config);
+        assertEquals(BlockEspSettings.ENGINE_WORLD, store.load().blockEsp.engine);
+
+        var settings = new BlockEspSettings();
+        settings.engine = null;
+        settings.sanitize();
+        assertEquals(BlockEspSettings.ENGINE_SIMULATION, settings.engine, "A missing engine falls back to the simulation");
+        settings.engine = "matrix world";
+        settings.sanitize();
+        assertEquals(BlockEspSettings.ENGINE_SIMULATION, settings.engine, "Unknown engines never start a session");
+        assertEquals("Seed simulation", dev.donut.client.blockesp.BlockEspController.engineLabel(BlockEspSettings.ENGINE_SIMULATION));
+        assertEquals("Vanilla world", dev.donut.client.blockesp.BlockEspController.engineLabel(BlockEspSettings.ENGINE_WORLD));
+    }
+
     @Test void numericValidationCoversSignedLimitsAndRejectsLossyOrMalformedSeeds() {
         assertEquals(Long.MIN_VALUE, BlockEspSettings.parseSeed("-9223372036854775808"));
         assertEquals(Long.MAX_VALUE, BlockEspSettings.parseSeed("9223372036854775807"));

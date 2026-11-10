@@ -34,6 +34,15 @@ All markers are **predictions**. A seed reconstructs original generation, not la
 
 Match the version that originally generated the chunks. A server running 1.21.11 may still contain older chunks. Custom world generators, terrain presets, generation datapacks, modified block tags, or separate feature seeds are outside this module's scope. Changing the seed, leaving the Overworld, disconnecting, or disabling clears the displayed results. **Rescan predictions** clears cached predictions and retries a failed scan; it cannot reconstruct a server's mining history.
 
+## Prediction engines
+
+The module can build predictions two ways, chosen under **Prediction engine**:
+
+* **Seed simulation** (default) ports the reference seed simulator (`SeedTerrain`). For each chunk it rebuilds the underground from the seed with the game's own generator - noise terrain, surface rules, carved caves and canyons, mineshafts - and then replays the features the generator runs before and including coal and emerald. It needs no server, no world directories, no chunk tickets and no generation threads, and because it does not depend on loaded chunks it also serves the far-away emerald search. This is the engine that reaches the 1500-block card.
+* **Vanilla world** is the original path: the vanilla world preset generated through the game's own chunk scheduler and ticket system, written to a unique temporary directory. It is slower to start and bounded by loaded chunks, but it is the reference behavior kept for comparison.
+
+Both produce deepslate coal and deepslate emerald only, and switching the engine mid-session rebuilds the prediction. The simulation reports features it had to skip in `latest.log` instead of failing the scan, and mineshafts are placed from the seed exactly as the server places them, which the vanilla full-chunk path also includes.
+
 ## Generation and resource use
 
 The module loads the vanilla normal world preset and uses Minecraft's actual chunk scheduler through FULL status. FULL status includes the neighboring feature writes that can cross chunk borders; simulating only ore placement or stopping at FEATURES can miss those writes. It scans generated block states for the two exact block IDs and skips section palettes without either target.

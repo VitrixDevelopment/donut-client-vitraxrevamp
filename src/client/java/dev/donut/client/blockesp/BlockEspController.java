@@ -62,8 +62,9 @@ public final class BlockEspController implements AutoCloseable {
     private List<OreMarker> markers = List.of();
     private String status = "Disabled";
     // Accessed exclusively by worker tasks, including cleanup.
-    private VanillaOreGenerator generator;
-    private long generatorSeed;
+    private OrePredictorEngine engine;
+    private long engineSeed;
+    private String engineName = "";
     // Verification state, touched only from the client thread.
     private final AreaVerdicts verdicts = new AreaVerdicts();
     private final MinedEvidence mined = new MinedEvidence();
@@ -149,7 +150,9 @@ public final class BlockEspController implements AutoCloseable {
         long nextSeed;
         try { nextSeed = BlockEspSettings.parseSeed(settings.seed); }
         catch (IllegalArgumentException error) { deactivate(error.getMessage()); return; }
-        if (!active || client.level != lastLevel || nextSeed != seed) {
+        // Switching engine mid-session rebuilds the prediction from the newly selected one.
+        if (!active || client.level != lastLevel || nextSeed != seed
+                || (engineName != null && !engineName.isEmpty() && !engineName.equals(engineLabel(settings.engine)))) {
             invalidate();
             lastLevel = client.level;
             seed = nextSeed;
@@ -179,19 +182,43 @@ public final class BlockEspController implements AutoCloseable {
     private Result generate(long token, long requestedSeed, ChunkPos chunk) {
         try {
             if (token != revision.get()) return null;
-            if (generator != null && (generatorSeed != requestedSeed || generator.shouldRecycle())) releaseGenerator();
-            if (generator == null) {
-                generator = new VanillaOreGenerator(requestedSeed, scratchParent);
-                generatorSeed = requestedSeed;
+            if (engine != null && engineSeed != requestedSeed) releaseEngine();
+            if (engine == null) {
+                engine = createEngine(requestedSeed);
+                engineSeed = requestedSeed;
             }
             if (token != revision.get()) return null;
-            return new Result(token, chunk.toLong(), generator.predict(chunk.x, chunk.z));
+            return new Result(token, chunk.toLong(), engine.predict(chunk.x, chunk.z));
         } catch (Exception error) {
             if (token != revision.get()) return null;
             throw new java.util.concurrent.CompletionException(error);
         } finally {
-            if (token != revision.get()) releaseGenerator();
+            if (token != revision.get()) releaseEngine();
         }
+    }
+
+    /**
+     * Builds the configured engine. The seed simulation runs the same vanilla generator per chunk without a server,
+     * while the vanilla world is the game's own generation; both were verified against fresh vanilla chunks.
+     */
+    private OrePredictorEngine createEngine(long requestedSeed) throws Exception {
+        String selected = config.blockEsp.engine;
+        // An unexpected value is never written back here: this runs on the worker, while the config belongs to the
+        // client thread. Anything that is not the vanilla world is the seed simulation.
+        if (BlockEspSettings.ENGINE_WORLD.equals(selected)) {
+            engineName = "Vanilla world";
+            return OrePredictorEngine.vanillaWorld(requestedSeed, scratchParent);
+        }
+        engineName = "Seed simulation";
+        return OrePredictorEngine.seedTerrain(requestedSeed);
+    }
+
+    /** Which engine produced the current markers. */
+    public String engineName() { return engineName; }
+
+    /** Label of the configured engine, without building it. */
+    public static String engineLabel(String engine) {
+        return BlockEspSettings.ENGINE_SIMULATION.equals(engine) ? "Seed simulation" : "Vanilla world";
     }
 
     private void collect() {
@@ -208,7 +235,7 @@ public final class BlockEspController implements AutoCloseable {
                 failed = true;
                 status = "Prediction failed - Rescan to retry (see latest.log)";
                 LOGGER.error("BlockESP could not generate vanilla ore predictions", error);
-                worker.execute(this::releaseGenerator);
+                worker.execute(this::releaseEngine);
             }
         } finally { pending = null; }
     }
@@ -428,23 +455,16 @@ public final class BlockEspController implements AutoCloseable {
                     cachedBiomes = biomes;
                     biomesSeed = requestedSeed;
                 }
-                if (generator == null || generatorSeed != requestedSeed) {
-                    if (generator != null) releaseGenerator();
-                    generator = new VanillaOreGenerator(requestedSeed, scratchParent);
-                    generatorSeed = requestedSeed;
+                if (engine == null || engineSeed != requestedSeed) {
+                    if (engine != null) releaseEngine();
+                    engine = createEngine(requestedSeed);
+                    engineSeed = requestedSeed;
                 }
-                var activeGenerator = generator;
-                var found = NearestEmeraldSearch.search(biomes,
-                        (chunkX, chunkZ) -> {
-                            List<BlockPos> positions = new ArrayList<>();
-                            for (var marker : activeGenerator.predict(chunkX, chunkZ)) {
-                                if (marker.kind() == OreMarker.Kind.EMERALD) positions.add(marker.pos());
-                            }
-                            return positions;
-                        },
+                var active = engine;
+                var found = NearestEmeraldSearch.search(biomes, active::deepslateEmerald,
                         from.getX(), from.getY(), from.getZ(), rangeBlocks, unmatched, removed, null);
                 if (token != revision.get()) return;
-                // VanillaOreGenerator only reports the deepslate variants, so every result is deepslate emerald.
+                // Both engines only report the deepslate variants, so every result is deepslate emerald.
                 for (BlockPos pos : found) deepslateEmerald.add(pos.asLong());
                 emeraldList = List.copyOf(found);
                 searchState = found.isEmpty() ? "no emerald within " + rangeBlocks + " blocks" : "";
@@ -537,13 +557,13 @@ public final class BlockEspController implements AutoCloseable {
         searchState = "not searched yet";
         lastSearchFrom = null;
         saveVerdicts();
-        worker.execute(this::releaseGenerator);
+        worker.execute(this::releaseEngine);
     }
 
-    private void releaseGenerator() {
-        if (generator != null) {
-            generator.close();
-            generator = null;
+    private void releaseEngine() {
+        if (engine != null) {
+            engine.close();
+            engine = null;
         }
     }
 
