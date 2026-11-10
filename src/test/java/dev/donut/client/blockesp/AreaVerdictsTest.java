@@ -52,8 +52,10 @@ class AreaVerdictsTest {
         var verdicts = new AreaVerdicts();
         String area = AreaVerdicts.key(false, -17, 33);
         assertEquals(AreaVerdicts.Status.UNVERIFIED, verdicts.status(area));
-        assertEquals(AreaVerdicts.Status.UNVERIFIED, verdicts.record(area, true, 1));
-        assertEquals(AreaVerdicts.Status.CONFIRMED, verdicts.record(area, true, 2), "A reached vein counts double");
+        verdicts.record(area, true, 1);
+        assertEquals(AreaVerdicts.Status.UNVERIFIED, verdicts.status(area), "One hit is not a verdict");
+        verdicts.record(area, true, 2);
+        assertEquals(AreaVerdicts.Status.CONFIRMED, verdicts.status(area), "A reached vein counts double");
         assertEquals(3, verdicts.hits(area));
         assertEquals(0, verdicts.misses(area));
         assertEquals(AreaVerdicts.Status.CONFIRMED, verdicts.count(AreaVerdicts.Status.CONFIRMED));
@@ -93,7 +95,7 @@ class AreaVerdictsTest {
         assertEquals(2, damaged.areas().size());
         assertEquals(AreaVerdicts.Status.UNVERIFIED, damaged.status("o1,1"));
         assertEquals(AreaVerdicts.Status.CONFIRMED, damaged.status("o5,5"));
-        assertNull(damaged.status("missing"));
+        assertEquals(AreaVerdicts.Status.UNVERIFIED, damaged.status("missing"), "An unknown area is unverified, never null");
     }
 
     @Test void missingFileAndClearAreHarmless() {

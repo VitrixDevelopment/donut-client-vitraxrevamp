@@ -55,11 +55,11 @@ class NearestEmeraldSearchTest {
         for (int x = -1500; x <= 1500; x += 32) columns.add(column(x, 0));
         var biomeField = biomes(columns);
         var candidates = NearestEmeraldSearch.candidates(biomeField, 0, 0, 1500, Set.of());
-        assertTrue(candidates.size() >= NearestEmeraldSearch.CANDIDATES);
+        assertTrue(candidates.size() >= NearestEmeraldSearch.CANDIDATES, "expected at least a candidate per close ring, got " + candidates.size());
         var chunks = NearestEmeraldSearch.candidatesNear(candidates);
-        assertTrue(chunks.size() <= NearestEmeraldSearch.CANDIDATES * 9, "At most a 3x3 neighbourhood per candidate");
-        assertTrue(chunks.size() >= 9);
-        assertEquals(chunks.size(), new java.util.HashSet<>(chunks).size(), "Chunk list has no duplicates");
+        assertTrue(chunks.size() <= NearestEmeraldSearch.CANDIDATES * 9, "chunk count " + chunks.size() + " exceeds 3x3 per candidate");
+        assertTrue(chunks.size() >= 9, "chunk count " + chunks.size());
+        assertEquals(chunks.size(), new java.util.HashSet<>(chunks).size(), "duplicate chunks in " + chunks);
 
         Map<Long, List<BlockPos>> ore = new HashMap<>();
         for (long key : chunks) ore.put(key, List.of(new BlockPos(ChunkPos.getX(key) * 16 + 8, -20, ChunkPos.getZ(key) * 16 + 8)));
@@ -67,11 +67,11 @@ class NearestEmeraldSearchTest {
         var found = NearestEmeraldSearch.search(biomeField,
                 (chunkX, chunkZ) -> ore.getOrDefault(ChunkPos.asLong(chunkX, chunkZ), List.of()),
                 0, 64, 0, 1500, Set.of(), Set.of(), deepslate);
-        assertEquals(chunks.size(), found.size());
-        assertEquals(chunks.size(), deepslate.size());
+        assertEquals(chunks.size(), found.size(), "found " + found);
+        assertEquals(chunks.size(), deepslate.size(), "deepslate set " + deepslate);
         for (int i = 1; i < found.size(); i++)
             assertTrue(found.get(i - 1).distSqr(BlockPos.ZERO.above(64)) <= found.get(i).distSqr(BlockPos.ZERO.above(64)),
-                    "Results must be nearest first");
+                    "Results must be nearest first: " + found.get(i - 1) + " then " + found.get(i));
         assertTrue(found.stream().noneMatch(pos -> pos.distSqr(BlockPos.ZERO.above(64)) > 500 * 500),
                 "Only chunks around the closest candidates are generated");
     }

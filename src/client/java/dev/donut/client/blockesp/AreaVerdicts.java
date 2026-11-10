@@ -69,12 +69,11 @@ public final class AreaVerdicts {
         return value == null ? Status.UNVERIFIED : statusOf(value[0], value[1]);
     }
 
-    /** Records evidence and returns the area's status after the change. */
-    public Status record(String key, boolean hit, int weight) {
+    /** Records evidence; read {@link #status(String)} afterwards for the verdict. */
+    public void record(String key, boolean hit, int weight) {
         int[] value = counts.computeIfAbsent(key, ignored -> new int[2]);
         value[hit ? 0 : 1] += Math.max(1, weight);
         dirty = true;
-        return statusOf(value[0], value[1]);
     }
 
     public int hits(String key) {

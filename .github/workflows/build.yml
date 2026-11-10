@@ -34,7 +34,9 @@ jobs:
           for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
               for bad in list(case):
                   if bad.tag in ("failure", "error"):
-                      print(case.get("classname") + "." + case.get("name") + " :: " + (bad.get("message") or "")[:300])
+                      lines = (bad.text or "").splitlines()
+                      where = " | ".join(line.strip() for line in lines if ".java:" in line)[:200]
+                      print(case.get("classname") + "." + case.get("name") + " :: " + (bad.get("message") or "")[:200] + " @@ " + where)
           PYEOF
           done
           grep -E "error:" gradle.log | sed 's#.*/donut-client-vitraxrevamp/src/#src/#' | head -80 | while IFS= read -r line; do
