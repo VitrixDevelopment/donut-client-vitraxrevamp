@@ -3,6 +3,7 @@
 package dev.donut.client.gui;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.donut.client.blockesp.BlockEspController;
 import dev.donut.client.config.ClientConfig;
 import dev.donut.client.config.ProgressBarSettings;
 import dev.donut.client.input.ModuleKeybinds;
@@ -90,6 +91,7 @@ public final class DonutScreen extends Screen {
     private String keyboardFocus;
     private ColorEditor colorEditor;
     private boolean scannerMethodMenu;
+    private boolean engineMenu;
     private int modeX, modeY, modeW;
     private boolean collectingClip;
     private boolean contentInteractive = true;
@@ -199,7 +201,7 @@ public final class DonutScreen extends Screen {
                 drawDetails(g);
             }
             drawFooter(g);
-            if ((scannerMethodMenu) && colorEditor == null) drawModeMenu(g);
+            if ((scannerMethodMenu || engineMenu) && colorEditor == null) drawModeMenu(g);
             if (colorEditor != null) {
                 double modalOpacity = pushOpacity(easeOut(modalProgress));
                 try { drawColorEditor(g); }
@@ -535,11 +537,25 @@ public final class DonutScreen extends Screen {
 
     private void drawModeMenu(GuiGraphics g) {
         hits.clear();
-        int rowH = s(32), h = rowH * 3;
+        int rowH = s(32), h = rowH * (engineMenu ? dev.donut.client.config.BlockEspSettings.ENGINES.size() : 3);
         int y = Math.clamp(modeY, 82, H - 42 - h);
         shadow(g, modeX, y, modeW, h, s(7), 0x80000000);
         surface(g, modeX, y, modeW, h, s(7), CONTROL, 0.9f);
         outline(g, modeX, y, modeW, h, s(7), 0x30FFFFFF);
+        if (engineMenu) {
+            var engines = dev.donut.client.config.BlockEspSettings.ENGINES;
+            for (int i = 0; i < engines.size(); i++) {
+                String engine = engines.get(i);
+                int top = y + i * rowH;
+                if (inside(modeX, top, modeW, rowH)) round(g, modeX, top, modeW, rowH, s(5), CONTROL_HOVER);
+                text(g, font, engine, modeX + s(10), top + s(8), CONTROL_TEXT);
+                hit("m13.engine" + i, modeX, top, modeW, rowH, () -> {
+                    change(() -> config.blockEsp.engine = engine);
+                    engineMenu = false;
+                });
+            }
+            return;
+        }
         if (scannerMethodMenu) {
             var methods = selectedModule == 10 ? dev.donut.client.config.AmethystSettings.METHODS : dev.donut.client.config.ChunkFinderSettings.METHODS;
             for (int i = 0; i < methods.size(); i++) {
@@ -548,7 +564,7 @@ public final class DonutScreen extends Screen {
                 if (inside(modeX, top, modeW, rowH)) round(g, modeX, top, modeW, rowH, s(5), CONTROL_HOVER);
                 text(g, font, method, modeX + s(10), top + s(8), CONTROL_TEXT);
                 hit("m" + selectedModule + ".method" + i, modeX, top, modeW, rowH,
-                        () -> { change(() -> { if (selectedModule == 10) config.amethyst.method = method; else config.chunkFinder.method = method; }); scannerMethodMenu = false; });
+                        () -> { change(() -> { if (selectedModule == 10) config.amethyst.method = method; else config.chunkFinder.method = method; }); scannerMethodMenu = false; engineMenu = false; });
             }
             return;
         }
@@ -986,6 +1002,18 @@ public final class DonutScreen extends Screen {
         });
         settingsCursor += s(44);
         help(g, value.seed + " | Vanilla Java 1.21.11");
+        section(g, "Prediction engine", 0);
+        button(g, "m13.engine", value.engine + "  v", rowX, settingsCursor, rowW, s(34), () -> {
+            scannerMethodMenu = !scannerMethodMenu;
+            engineMenu = !engineMenu;
+            modeX = rowX;
+            modeY = settingsCursor + s(38);
+            modeW = rowW;
+        });
+        settingsCursor += s(44);
+        help(g, BlockEspController.engineLabel(value.engine).equals("Seed simulation")
+                ? "Rebuilds terrain, caves and ore per chunk from the seed; no server or world files, so it also reaches further."
+                : "The game's own world generation through its chunk scheduler; the reference behavior.");
         section(g, "Targets", 0);
         settingToggle(g, "emerald", "Deepslate emerald", 0, () -> value.emerald, () -> value.emerald = !value.emerald);
         colorRow(g, "Emerald color", 0, () -> value.emeraldColor, next -> value.emeraldColor = next);
@@ -996,6 +1024,29 @@ public final class DonutScreen extends Screen {
         slider(g, "opacity", "Opacity", 0, () -> value.opacity, next -> value.opacity = (int) next, 0, 255, 1, "");
         settingToggle(g, "tracers", "Tracers", 0, () -> value.tracers, () -> value.tracers = !value.tracers);
         settingToggle(g, "showHud", "Coordinates / distance HUD", 0, () -> value.showHud, () -> value.showHud = !value.showHud);
+        section(g, "Area verification", 0);
+        settingToggle(g, "verifyAreas", "Check areas with real ore", 0, () -> value.verifyAreas,
+                () -> value.verifyAreas = !value.verifyAreas);
+        settingToggle(g, "confirmedOnly", "Confirmed areas only", 0, () -> value.confirmedOnly,
+                () -> value.confirmedOnly = !value.confirmedOnly);
+        settingToggle(g, "showUnmatched", "Show areas that do not match", 0, () -> value.showUnmatched,
+                () -> value.showUnmatched = !value.showUnmatched);
+        settingToggle(g, "chatNotices", "Chat notices", 0, () -> value.chatNotices, () -> value.chatNotices = !value.chatNotices);
+        button(g, "m13.clearAreas", "Clear learned area evidence", rowX, settingsCursor, rowW, s(34), () -> {
+            var current = dev.donut.client.blockesp.BlockEspController.get();
+            if (current != null) current.clearAreas();
+        });
+        settingsCursor += s(44);
+        help(g, "Exposed ore decides whether an area follows the seed. Areas where the server placed ore differently are hidden and remembered.");
+        section(g, "Mined check", 0);
+        settingToggle(g, "minedTest", "Air check beside veins", 0, () -> value.minedTest, () -> value.minedTest = !value.minedTest);
+        help(g, "Compares predicted blocks that are already air or liquid with control spots beside them.");
+        section(g, "Nearest emerald", 0);
+        settingToggle(g, "nearestEmerald", "Nearest emerald card", 0, () -> value.nearestEmerald,
+                () -> value.nearestEmerald = !value.nearestEmerald);
+        slider(g, "emeraldSearchRange", "Search range", 0, () -> value.emeraldSearchRange,
+                next -> value.emeraldSearchRange = (int) next, 256, 1500, 32, " blocks");
+        help(g, "Searches mountain biomes from the seed and generates only the closest ones, skipping areas that do not match.");
         section(g, "Predictions", 0);
         var controller = dev.donut.client.blockesp.BlockEspController.get();
         help(g, controller == null ? "Enable BlockESP in a world to predict ores." : controller.status());
@@ -1298,7 +1349,7 @@ public final class DonutScreen extends Screen {
         round(g, x, y + s(11), s(44), s(24), s(7), alpha(getter.getAsInt(), 1));
         outline(g, x, y + s(11), s(44), s(24), s(7), alpha(0xFFFFFF, inside(x, y, s(44), s(46)) ? .4 : .15));
         hit(rowPrefix + "color" + label, x, y + s(11), s(44), s(24),
-                () -> { colorEditor = new ColorEditor(label, getter, setter); modalProgress = 0; keyboardFocus = null; scannerMethodMenu = false; });
+                () -> { colorEditor = new ColorEditor(label, getter, setter); modalProgress = 0; keyboardFocus = null; scannerMethodMenu = false; engineMenu = false; });
         settingsCursor += s(46);
     }
 
@@ -1517,7 +1568,7 @@ public final class DonutScreen extends Screen {
             return true;
         }
 
-        scannerMethodMenu = false;
+        scannerMethodMenu = false; engineMenu = false;
         return true;
     }
 
@@ -1537,7 +1588,7 @@ public final class DonutScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double horizontal, double vertical) {
-        if (closing || colorEditor != null || scannerMethodMenu || binding >= 0) return true;
+        if (closing || colorEditor != null || scannerMethodMenu || engineMenu || binding >= 0) return true;
         double localX = (x - originX) / scale, localY = (y - originY) / scale;
         if (localX >= detailX && localX <= detailX + detailW && localY >= detailTop && localY <= detailBottom) {
             commitBasesFound();
@@ -1642,13 +1693,13 @@ public final class DonutScreen extends Screen {
             return true;
         }
         if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
-            if (scannerMethodMenu) { scannerMethodMenu = false; }
+            if (scannerMethodMenu || engineMenu) { scannerMethodMenu = false; engineMenu = false; }
             else if (colorEditor != null) closeColor();
             else if (searchFocused) { searchFocused = false; query = ""; contentProgress = 0; }
             else onClose();
             return true;
         }
-        if (colorEditor == null && !scannerMethodMenu && tab != 2 && tab != 6 && event.key() == GLFW.GLFW_KEY_F && event.hasControlDown()) {
+        if (colorEditor == null && !scannerMethodMenu && !engineMenu && tab != 2 && tab != 6 && event.key() == GLFW.GLFW_KEY_F && event.hasControlDown()) {
             searchFocused = true;
             keyboardFocus = null;
             return true;
@@ -1704,7 +1755,7 @@ public final class DonutScreen extends Screen {
             });
             return true;
         }
-        if (colorEditor == null && !scannerMethodMenu && !searchFocused) {
+        if (colorEditor == null && !scannerMethodMenu && !engineMenu && !searchFocused) {
             if (event.key() == GLFW.GLFW_KEY_PAGE_DOWN || event.key() == GLFW.GLFW_KEY_PAGE_UP) {
                 if (selectedModule >= 0 || tab == 2 || tab == 6) detailScrollTarget = Math.clamp(detailScrollTarget + (event.key() == GLFW.GLFW_KEY_PAGE_DOWN ? s(170) : -s(170)), 0, Math.max(0, detailContentHeight - (detailBottom - detailTop)));
                 else scrollTarget = Math.clamp(scrollTarget + (event.key() == GLFW.GLFW_KEY_PAGE_DOWN ? 170 : -170), 0, Math.max(0, contentHeight - (BOTTOM - TOP)));
