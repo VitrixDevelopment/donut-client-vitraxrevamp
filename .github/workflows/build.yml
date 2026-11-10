@@ -28,28 +28,18 @@ jobs:
           say "JAR=$jar"; [ -n "$jar" ] || { head -5 jars.txt | while IFS= read -r l; do say "$l"; done; exit 0; }
           one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
           cp=$(find .gradle/loom-cache/minecraftMaven -name "*.jar" 2>/dev/null | grep -v sources | tr '\n' ':')
-          say "CP entries: $(echo "$cp" | tr ':' '\n' | grep -c jar)"
           one() { javap -classpath "$cp" "$1" 2>&1 | grep -F "$2" | head -2 | tr -s ' ' | tr '\n' '|'; }
-          say "SM: $(one net.minecraft.world.level.StructureManager 'StructureManager(')"
-          say "PCF: $(one net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory(')"
-          say "CTX: $(one net.minecraft.world.level.levelgen.carver.CarvingContext 'CarvingContext(')"
-          say "PIECE: $(one net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
-          say "FILL: $(one net.minecraft.world.level.chunk.ChunkGenerator 'fillFromNoise')"
-          say "SURF: $(one net.minecraft.world.level.chunk.ChunkGenerator 'buildSurface')"
-          say "BGS: $(one net.minecraft.world.level.chunk.ChunkGenerator 'getBiomeGenerationSettings')"
-          say "GEN: $(one net.minecraft.world.level.chunk.ChunkGenerator 'generate(')"
-          say "CARVE: $(one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'carve(')"
-          say "START: $(one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'isStartChunk')"
-          say "PH: $(one net.minecraft.world.level.chunk.ProtoChunk 'getHeight')"
-          say "PFB: $(one net.minecraft.world.level.chunk.ProtoChunk 'fillBiomes')"
-          say "PNC: $(one net.minecraft.world.level.chunk.ProtoChunk 'getNoiseChunk')"
-          say "PGC: $(one net.minecraft.world.level.chunk.ProtoChunk 'getHeightAccessorForGeneration')"
-          say "SECB: $(one net.minecraft.world.level.chunk.LevelChunkSection 'getBiomes')"
-          say "SECC: $(one net.minecraft.world.level.chunk.LevelChunkSection 'copy(')"
-          say "SECTY: $(one net.minecraft.world.level.chunk.LevelChunkSection 'getSectionYFromSectionIndex')"
-          say "HMP: $(one net.minecraft.world.level.WorldGenLevel 'getHeightmapPos')"
+          say "WGR: $(one net.minecraft.server.level.WorldGenRegion 'WorldGenRegion(')"
+          say "CGALL: $(javap -classpath "$cp" net.minecraft.world.level.chunk.ChunkGenerator 2>&1 | tr -s ' ' | tr '\n' '|' | cut -c1-360)"
+          say "NBCCG: $(javap -classpath "$cp" net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator 2>&1 | tr -s ' ' | tr '\n' '|' | cut -c1-360)"
+          say "SURFSYS: $(one net.minecraft.world.level.levelgen.SurfaceSystem 'buildSurface')"
+          say "CARVER: $(one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'carve')"
+          say "CC: $(one net.minecraft.world.level.chunk.CarvingContext 'CarvingContext(')"
+          say "PC: $(javap -classpath "$cp" net.minecraft.world.level.chunk.ProtoChunk 2>&1 | grep -E 'Noise|Carving|Biomes|Height' | tr -s ' ' | tr '\n' '|' | cut -c1-360)"
+          say "LCS: $(javap -classpath "$cp" net.minecraft.world.level.chunk.LevelChunkSection 2>&1 | grep -E 'getBiomes|copy|maybeHas' | tr -s ' ' | tr '\n' '|' | cut -c1-300)"
+          say "STRUCTGEN: $(one net.minecraft.world.level.levelgen.structure.Structure 'generate(')"
           say "RSP: $(one net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement 'getPotentialStructureChunk')"
-          say "MNBS: $(one net.minecraft.world.level.biome.MultiNoiseBiomeSource 'createFromPreset')"
+          say "CHUNKPOS: $(javap -classpath "$cp" net.minecraft.world.level.ChunkPos 2>&1 | grep -E 'getMinBlockX|getMinBlockZ|pack|asLong' | tr -s ' ' | tr '\n' '|' | cut -c1-220)"
 
       - name: Surface build errors as annotations
         if: failure()
