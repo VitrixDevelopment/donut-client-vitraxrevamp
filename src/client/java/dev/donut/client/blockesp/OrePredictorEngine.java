@@ -18,6 +18,10 @@ public interface OrePredictorEngine extends AutoCloseable {
     /** Predicted deepslate emerald positions inside one chunk, for the nearest-emerald search. */
     List<net.minecraft.core.BlockPos> deepslateEmerald(int chunkX, int chunkZ);
 
+    /** Releases the engine. Narrowed so callers do not have to handle a checked exception. */
+    @Override
+    void close();
+
     /**
      * Full vanilla world generation: the game's own chunk scheduler, world directories and tickets.
      * The first chunk of a new session is slow because the world has to be prepared.

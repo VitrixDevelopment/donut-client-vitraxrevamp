@@ -3,6 +3,7 @@
 package dev.donut.client.gui;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.donut.client.blockesp.BlockEspController;
 import dev.donut.client.config.ClientConfig;
 import dev.donut.client.config.ProgressBarSettings;
 import dev.donut.client.input.ModuleKeybinds;
