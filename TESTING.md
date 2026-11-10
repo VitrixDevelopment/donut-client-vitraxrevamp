@@ -16,25 +16,13 @@ The multiplayer Fly suite uses a dedicated server bound to localhost and logs a 
 - Native GUI checks cover search, Favorites, completion controls, malformed names, duplicate rejection, username/UUID addition, row removal, evidence navigation, settings persistence, the real production shortcut and restoration, and GUI scales 1 and 2. Visually reviewed the HUD, roster and settings at both scales. Captures are saved as `docs/screenshots/staff-detector-*.png`.
 - Inspected the remapped **1.21.0** JAR for all staff detector classes and verified it contains no unit/game-test classes. Source and release JARs are under `build/libs/`. No external-server vanish plugin, precision/recall measurement or packet-storm performance benchmark was tested. See [the Staff Detector guide](docs/staff-detector.md) for observation semantics and setup.
 
-## Added in this branch (not yet built here)
+## Verified on 2026-11-10 (this branch, 1.21.11)
 
-The area-verification work was written and parsed here, not compiled or run: this checkout has no JDK 21, no Gradle
-caches, and no access to the Fabric/Mojang Maven hosts, so `./gradlew test` and `runClientGameTest` still need one local
-run before release.
-
-New unit tests cover the pure logic only: `AreaVerdictsTest` (8x8 chunk floors at negative coordinates, confirm/reject
-thresholds, weighted evidence, file round-trip, damaged lines), `MinedEvidenceTest` (packing compatible with
-`BlockPos.asLong`, controls two blocks away, no double counting, mining versus cave air), `NearestEmeraldSearchTest`
-(ring walk, 256-1500 clamp, 3x3 candidate neighbourhoods, distance order, skipped rejected areas and mined blocks) and
-`BlockEspHudLinesTest` (line truncation, relative arrows and compass letters). The newly ported `SeedTerrain` engine (`SeedTerrain.java` + `SeedTerrainEngine.java`, selected through
-`OrePredictorEngine`) still has to be compared against fresh vanilla chunks in the game test before it is trusted: the
-port changed the package, `ChunkPos.pack` to `ChunkPos.asLong`, the record accessors and the `StructureManager`
-constructor to this repository's mappings, and those are the lines to watch first.
-
-Runtime behavior still needs the focused
-BlockESP game test, extended with: confirming a matching area from a placed exposed ore, rejecting an area from four
-placed ores the prediction does not hold, the mined test on a dug-out predicted vein, and a nearest-emerald card for a
-mountain area.
+- **Compiles and passes unit tests against Minecraft 1.21.11.** `./gradlew build` on GitHub Actions (JDK 21, Temurin) completed successfully: compile, the full JUnit suite and the release jar (2.48 MB, uploaded as the `donut-client` artifact). The local sandbox can only reach GitHub/npm/PyPI, so the Minecraft, Fabric and Gradle dependencies cannot be resolved there; CI is the reference result.
+- The first runs found and fixed real mapping problems in the ported engine: `StructureManager` takes `(LevelAccessor, WorldOptions, StructureCheck)` in 1.21.11, `ChunkGenerator#buildSurface`/`applyCarvers` require a `WorldGenRegion` (the full-world engine remains the one used at runtime), `LevelAccessor` rather than `LevelHeightAccessor` for the manager, a missing `BlockEspController` import in the settings screen, and `OrePredictorEngine#close()` no longer declares a checked exception.
+- Three unit tests were wrong rather than the code: `AreaVerdicts.record` is a write (the verdict comes from `status()`), an unknown area reports `UNVERIFIED` instead of null, and the search test placed emerald columns off the 32-block sampling grid.
+- New tests in this branch: `AreaVerdictsTest`, `MinedEvidenceTest`, `NearestEmeraldSearchTest`, `BlockEspHudLinesTest`, plus engine/area preferences in `BlockEspSettingsTest`.
+- Still outstanding: the BlockESP game test (fresh vanilla chunk comparison, area verdicts from placed ore, mined test, emerald card) has **not** been run, and the ported `SeedTerrain` engine has not yet been compared chunk-for-chunk against fresh vanilla generation at runtime. Marker output is original-generation prediction only.
 
 ## Verified on 2026-11-06 (1.20.0 BlockESP)
 
