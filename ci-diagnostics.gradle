@@ -1,0 +1,13 @@
+// Temporary CI helper: prints the resolved client compile classpath entries for the game jar.
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    root.tasks.register('dumpMappedJars') {
+        doLast {
+            def configuration = root.configurations.findByName('clientCompileClasspath')
+            if (configuration == null) { println 'MAPPED none'; return }
+            configuration.files.each { file ->
+                if (file.name.contains('minecraft')) println 'MAPPED ' + file.absolutePath
+            }
+        }
+    }
+}

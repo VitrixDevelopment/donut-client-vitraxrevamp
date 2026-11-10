@@ -23,9 +23,30 @@ jobs:
         if: always()
         run: |
           say() { printf '::error::API %s\n' "${1:0:370}"; }
-          say "find count: $(find /home/runner /root -name '*.jar' 2>/dev/null | wc -l)"
-          find /home/runner /root -name "*.jar" 2>/dev/null | grep -Ev "/wrapper/|gradle-[0-9]" | head -25 | while IFS= read -r f; do say "jar $f"; done
-          find /home/runner /root -maxdepth 4 -type d -name "*loom*" -o -maxdepth 4 -type d -name "minecraft*" 2>/dev/null | head -15 | while IFS= read -r d; do say "dir $d"; done
+          bash gradlew --no-daemon -q -I ci-diagnostics.gradle dumpMappedJars > jars.txt 2>&1 || true
+          jar=$(grep '^MAPPED ' jars.txt | grep -v sources | head -1 | sed 's/^MAPPED //')
+          say "JAR=$jar"; [ -n "$jar" ] || { head -5 jars.txt | while IFS= read -r l; do say "$l"; done; exit 0; }
+          one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
+          one net.minecraft.world.level.StructureManager "StructureManager("
+          one net.minecraft.world.level.chunk.PalettedContainerFactory "PalettedContainerFactory("
+          one net.minecraft.world.level.levelgen.carver.CarvingContext "CarvingContext("
+          one net.minecraft.world.level.levelgen.structure.StructurePiece "postProcess"
+          one net.minecraft.world.level.chunk.ChunkGenerator "fillFromNoise"
+          one net.minecraft.world.level.chunk.ChunkGenerator "buildSurface"
+          one net.minecraft.world.level.chunk.ChunkGenerator "getBiomeGenerationSettings"
+          one net.minecraft.world.level.chunk.ChunkGenerator "generate("
+          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "isStartChunk"
+          one net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver "carve("
+          one net.minecraft.world.level.chunk.ProtoChunk "getHeight"
+          one net.minecraft.world.level.chunk.ProtoChunk "fillBiomes"
+          one net.minecraft.world.level.chunk.ProtoChunk "getNoiseChunk"
+          one net.minecraft.world.level.chunk.ProtoChunk "getHeightAccessorForGeneration"
+          one net.minecraft.world.level.chunk.LevelChunkSection "getBiomes"
+          one net.minecraft.world.level.chunk.LevelChunkSection "copy("
+          one net.minecraft.world.level.chunk.LevelChunkSection "getSectionYFromSectionIndex"
+          one net.minecraft.world.level.biome.MultiNoiseBiomeSource "createFromPreset"
+          one net.minecraft.world.level.WorldGenLevel "getHeightmapPos"
+          one net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement "getPotentialStructureChunk"
 
       - name: Surface build errors as annotations
         if: failure()
