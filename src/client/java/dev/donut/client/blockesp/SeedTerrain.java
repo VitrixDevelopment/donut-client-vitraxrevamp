@@ -119,7 +119,9 @@ public final class SeedTerrain {
         this.containers = new PalettedContainerFactory(Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY),
                 Blocks.AIR.defaultBlockState(), null, Strategy.createForBiomes(biomeIds), plains, null);
         // No structures: nothing bends the terrain around villages, cities etc.
-        this.structures = new StructureManager((net.minecraft.world.level.LevelAccessor) null, (RandomState) null, 0L) {
+        this.structures = new StructureManager((net.minecraft.world.level.LevelAccessor) null,
+                (net.minecraft.world.level.levelgen.WorldOptions) null,
+                (net.minecraft.world.level.levelgen.structure.StructureCheck) null) {
             @Override
             public List<StructureStart> startsForStructure(ChunkPos pos, java.util.function.Predicate<Structure> filter) {
                 return List.of();

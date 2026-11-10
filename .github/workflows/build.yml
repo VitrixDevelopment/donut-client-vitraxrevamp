@@ -19,26 +19,6 @@ jobs:
           distribution: 'temurin'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
-      - name: Inspect mapped API (temporary diagnostics)
-        if: always()
-        run: |
-          say() { printf '::error::API %s\n' "${1:0:370}"; }
-          bash gradlew --no-daemon -q -I ci-diagnostics.gradle dumpMappedJars > jars.txt 2>&1 || true
-          jar=$(grep '^MAPPED ' jars.txt | grep -v sources | head -1 | sed 's/^MAPPED //')
-          say "JAR=$jar"; [ -n "$jar" ] || { head -5 jars.txt | while IFS= read -r l; do say "$l"; done; exit 0; }
-          one() { javap -classpath "$jar" "$1" 2>&1 | grep -F "$2" | head -2 | tr '\n' '|'; }
-          cp=$(find .gradle/loom-cache/minecraftMaven -name "*.jar" 2>/dev/null | grep -v sources | tr '\n' ':')
-          d() { javap -classpath "$cp" "$1" 2>&1 | grep -E "$2" | tr -s ' ' | tr '\n' '|' | cut -c1-330; }
-          say "CARVER: $(d net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver 'carve|isStartChunk')"
-          say "PCNOISE: $(d net.minecraft.world.level.chunk.ProtoChunk 'Noise|Carving|getHeight\(')"
-          say "PCF: $(d net.minecraft.world.level.chunk.PalettedContainerFactory 'PalettedContainerFactory\(')"
-          say "CA: $(d net.minecraft.world.level.chunk.ChunkAccess 'Noise|SectionY|getMinSection')"
-          say "STRUCT: $(d net.minecraft.world.level.levelgen.structure.Structure 'generate\(')"
-          say "LCS: $(d net.minecraft.world.level.chunk.LevelChunkSection 'copy\(|getBiomes')"
-          say "CHUNKGEN2: $(d net.minecraft.world.level.chunk.ChunkGenerator 'getBiomeGenerationSettings|createStructures|spawnOriginalMobs')"
-          say "SSET: $(d net.minecraft.world.level.levelgen.structure.StructureSet 'placement\(')"
-          say "PIECE2: $(d net.minecraft.world.level.levelgen.structure.StructurePiece 'postProcess')"
-
       - name: Surface build errors as annotations
         if: failure()
         run: |
@@ -52,6 +32,9 @@ jobs:
                   if bad.tag in ("failure", "error"):
                       print(case.get("classname") + "." + case.get("name") + " :: " + (bad.get("message") or "")[:300])
           PYEOF
+          done
+          grep -E "error:" gradle.log | sed 's#.*/src/#src/#' | head -60 | while IFS= read -r line; do
+            echo "::error::COMPILE $line"
           done
           grep -E "error:|FAILURE:|What went wrong|Could not|Execution failed" -A 6 gradle.log | head -80 | while IFS= read -r line; do
             clean=$(echo "$line" | tr -cd '[:print:]' | cut -c1-400)
